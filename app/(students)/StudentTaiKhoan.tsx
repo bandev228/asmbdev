@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
-  Switch,
   TextInput,
   Platform,
   StatusBar,
@@ -15,13 +14,18 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Switch,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import auth from "@react-native-firebase/auth"
-import firestore from "@react-native-firebase/firestore"
+import { getAuth, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential, linkWithCredential, unlink } from "@react-native-firebase/auth"
+import { getFirestore, doc, getDoc, updateDoc } from "@react-native-firebase/firestore"
 import * as ImagePicker from "expo-image-picker"
 import { useRouter } from "expo-router"
+import * as FileSystem from "expo-file-system"
+import * as LocalAuthentication from "expo-local-authentication"
+import { LinearGradient } from "expo-linear-gradient"
+import { BlurView } from "expo-blur"
 
 const { width } = Dimensions.get("window")
 const isTablet = width > 768
@@ -30,29 +34,27 @@ interface UserProfile {
   displayName: string
   email: string
   photoURL: string
-  phoneNumber: string
   studentId: string
   department: string
-  notificationsEnabled: boolean
-  darkModeEnabled: boolean
+  role: "Admin" | "Lecturer" | "Student"
+  points: number
+  eventsJoined: number
+  isGoogleLinked: boolean
   biometricEnabled: boolean
-  privacySettings: {
-    showEmail: boolean
-    showPhone: boolean
-    showActivities: boolean
-  }
 }
 
-const AccountManagementScreen = () => {
+const StudentTaiKhoan = () => {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [editMode, setEditMode] = useState(false)
   const [updatedUser, setUpdatedUser] = useState<Partial<UserProfile>>({})
-  const [activeSection, setActiveSection] = useState("profile")
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [biometricAvailable, setBiometricAvailable] = useState(false)
+  const auth = getAuth()
+  const db = getFirestore()
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -60,40 +62,49 @@ const AccountManagementScreen = () => {
   const scaleAnim = useRef(new Animated.Value(0.95)).current
 
   useEffect(() => {
-    // Start entrance animation
+    startAnimation()
+    fetchUserData()
+    checkBiometricAvailability()
+  }, [])
+
+  const startAnimation = () => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
+        duration: 500,
         useNativeDriver: true,
       }),
-      Animated.timing(translateY, {
+      Animated.spring(translateY, {
         toValue: 0,
-        duration: 800,
+        tension: 50,
+        friction: 7,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
-        friction: 8,
-        tension: 40,
+        tension: 50,
+        friction: 7,
         useNativeDriver: true,
       }),
     ]).start()
+  }
 
-    // Fetch user data
-    fetchUserData()
-  }, [])
+  const checkBiometricAvailability = async () => {
+    const compatible = await LocalAuthentication.hasHardwareAsync()
+    const enrolled = await LocalAuthentication.isEnrolledAsync()
+    setBiometricAvailable(compatible && enrolled)
+  }
 
   const fetchUserData = async () => {
     try {
       setLoading(true)
-      const currentUser = auth().currentUser
+      const currentUser = auth.currentUser
 
       if (!currentUser) {
         throw new Error("Người dùng chưa đăng nhập")
       }
 
-      const userDoc = await firestore().collection("users").doc(currentUser.uid).get()
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid))
 
       if (userDoc.exists) {
         const userData = userDoc.data() as UserProfile
@@ -101,101 +112,29 @@ const AccountManagementScreen = () => {
           displayName: userData.displayName || currentUser.displayName || "",
           email: userData.email || currentUser.email || "",
           photoURL: userData.photoURL || currentUser.photoURL || "",
-          phoneNumber: userData.phoneNumber || currentUser.phoneNumber || "",
           studentId: userData.studentId || "",
           department: userData.department || "",
-          notificationsEnabled: userData.notificationsEnabled !== undefined ? userData.notificationsEnabled : true,
-          darkModeEnabled: userData.darkModeEnabled || false,
+          role: userData.role || "Student",
+          points: userData.points || 0,
+          eventsJoined: userData.eventsJoined || 0,
+          isGoogleLinked: userData.isGoogleLinked || false,
           biometricEnabled: userData.biometricEnabled || false,
-          privacySettings: userData.privacySettings || {
-            showEmail: true,
-            showPhone: false,
-            showActivities: true,
-          },
         })
-        setUpdatedUser({})
-      } else {
-        // Create default user profile if it doesn't exist
-        const defaultProfile: UserProfile = {
-          displayName: currentUser.displayName || "",
-          email: currentUser.email || "",
-          photoURL: currentUser.photoURL || "",
-          phoneNumber: currentUser.phoneNumber || "",
-          studentId: "",
-          department: "",
-          notificationsEnabled: true,
-          darkModeEnabled: false,
-          biometricEnabled: false,
-          privacySettings: {
-            showEmail: true,
-            showPhone: false,
-            showActivities: true,
-          },
-        }
-
-        setUser(defaultProfile)
-
-        // Save default profile to Firestore
-        await firestore().collection("users").doc(currentUser.uid).set(defaultProfile, { merge: true })
       }
     } catch (err) {
       console.error("Error fetching user data:", err)
-      setError(err instanceof Error ? err.message : "Đã xảy ra lỗi khi tải dữ liệu người dùng")
+      setError(err instanceof Error ? err.message : "Đã xảy ra lỗi khi tải dữ liệu")
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleSaveProfile = async () => {
-    if (!user) return
-
-    try {
-      setIsSaving(true)
-      const currentUser = auth().currentUser
-
-      if (!currentUser) {
-        throw new Error("Người dùng chưa đăng nhập")
-      }
-
-      // Update display name in Auth if changed
-      if (updatedUser.displayName && updatedUser.displayName !== user.displayName) {
-        await currentUser.updateProfile({
-          displayName: updatedUser.displayName,
-        })
-      }
-
-      // Update user document in Firestore
-      await firestore()
-        .collection("users")
-        .doc(currentUser.uid)
-        .update({
-          ...updatedUser,
-        })
-
-      // Update local state
-      setUser({
-        ...user,
-        ...updatedUser,
-      })
-
-      setUpdatedUser({})
-      setEditMode(false)
-
-      Alert.alert("Thành công", "Thông tin tài khoản đã được cập nhật")
-    } catch (err) {
-      console.error("Error updating profile:", err)
-      Alert.alert("Lỗi", "Không thể cập nhật thông tin tài khoản. Vui lòng thử lại sau.")
-    } finally {
-      setIsSaving(false)
     }
   }
 
   const handlePickImage = async () => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync()
-
+      
       if (!permissionResult.granted) {
-        Alert.alert("Cần quyền truy cập", "Vui lòng cấp quyền truy cập thư viện ảnh để thay đổi ảnh đại diện.")
+        Alert.alert("Cần quyền truy cập", "Vui lòng cấp quyền truy cập thư viện ảnh")
         return
       }
 
@@ -208,13 +147,7 @@ const AccountManagementScreen = () => {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const imageUri = result.assets[0].uri
-
-        // In a real app, you would upload this image to storage
-        // For now, we'll just update the photoURL in the state
-        setUpdatedUser({
-          ...updatedUser,
-          photoURL: imageUri,
-        })
+        await uploadImage(imageUri)
       }
     } catch (err) {
       console.error("Error picking image:", err)
@@ -222,509 +155,182 @@ const AccountManagementScreen = () => {
     }
   }
 
-  const handleLogout = async () => {
-    Alert.alert("Đăng xuất", "Bạn có chắc chắn muốn đăng xuất?", [
-      {
-        text: "Hủy",
-        style: "cancel",
-      },
-      {
-        text: "Đăng xuất",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await auth().signOut()
-            router.replace("/(auth)/login")
-          } catch (err) {
-            console.error("Error signing out:", err)
-            Alert.alert("Lỗi", "Không thể đăng xuất. Vui lòng thử lại.")
-          }
-        },
-      },
-    ])
+  const uploadImage = async (uri: string) => {
+    try {
+      setIsSaving(true)
+      const currentUser = auth.currentUser
+      if (!currentUser) {
+        Alert.alert("Lỗi", "Không tìm thấy người dùng")
+        return
+      }
+
+      // Nén ảnh trước khi chuyển đổi
+      const compressedImage = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.3, // Giảm chất lượng xuống 30% để giảm kích thước
+        base64: true, // Trả về dạng base64
+      })
+
+      if (!compressedImage.canceled && compressedImage.assets && compressedImage.assets.length > 0) {
+        const base64 = compressedImage.assets[0].base64
+        if (!base64) {
+          throw new Error("Không thể chuyển đổi ảnh")
+        }
+
+        // Kiểm tra kích thước base64 (tối đa 1MB)
+        const base64Size = (base64.length * 3) / 4
+        if (base64Size > 1024 * 1024) { // 1MB
+          Alert.alert("Lỗi", "Ảnh quá lớn. Vui lòng chọn ảnh nhỏ hơn")
+          return
+        }
+
+        // Tạo URL base64
+        const imageUrl = `data:image/jpeg;base64,${base64}`
+
+        try {
+          // Update auth profile
+          await updateProfile(currentUser, {
+            photoURL: imageUrl
+          })
+          
+          // Update Firestore
+          await updateDoc(doc(db, "users", currentUser.uid), {
+            photoURL: imageUrl
+          })
+          
+          setUpdatedUser({
+            ...updatedUser,
+            photoURL: imageUrl
+          })
+          
+          Alert.alert("Thành công", "Ảnh đại diện đã được cập nhật")
+        } catch (updateError) {
+          console.error("Error updating profile:", updateError)
+          Alert.alert("Lỗi", "Không thể cập nhật ảnh đại diện. Vui lòng thử lại.")
+        }
+      }
+    } catch (err) {
+      console.error("Error uploading image:", err)
+      Alert.alert("Lỗi", "Không thể tải lên ảnh. Vui lòng thử lại.")
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  const handleDeleteAccount = () => {
+  const handleUpdateProfile = async () => {
+    if (!user) return
+
+    try {
+      setIsSaving(true)
+      const currentUser = auth.currentUser
+
+      if (!currentUser) {
+        throw new Error("Người dùng chưa đăng nhập")
+      }
+
+      if (updatedUser.displayName) {
+        await updateProfile(currentUser, {
+          displayName: updatedUser.displayName
+        })
+      }
+
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        ...updatedUser
+      })
+
+      setUser({
+        ...user,
+        ...updatedUser
+      })
+      setUpdatedUser({})
+      setEditMode(false)
+
+      Alert.alert("Thành công", "Thông tin tài khoản đã được cập nhật")
+    } catch (err) {
+      console.error("Error updating profile:", err)
+      Alert.alert("Lỗi", "Không thể cập nhật thông tin. Vui lòng thử lại.")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+    try {
+      const user = auth.currentUser
+      if (!user || !user.email) return
+
+      const credential = EmailAuthProvider.credential(user.email, currentPassword)
+      await reauthenticateWithCredential(user, credential)
+      await updatePassword(user, newPassword)
+      Alert.alert("Thành công", "Mật khẩu đã được cập nhật")
+    } catch (err) {
+      console.error("Error changing password:", err)
+      Alert.alert("Lỗi", "Không thể đổi mật khẩu. Vui lòng kiểm tra lại mật khẩu hiện tại.")
+    }
+  }
+
+  const handleToggleBiometric = async () => {
+    if (!user) return
+
+    try {
+      if (!user.biometricEnabled) {
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: "Xác thực để bật đăng nhập sinh trắc học",
+        })
+
+        if (!result.success) {
+          throw new Error("Xác thực thất bại")
+        }
+      }
+
+      await updateDoc(doc(db, "users", auth.currentUser!.uid), {
+        biometricEnabled: !user.biometricEnabled
+      })
+
+      setUser({
+        ...user,
+        biometricEnabled: !user.biometricEnabled
+      })
+
+      Alert.alert(
+        "Thành công",
+        `Đăng nhập sinh trắc học đã được ${user.biometricEnabled ? "tắt" : "bật"}`
+      )
+    } catch (err) {
+      console.error("Error toggling biometric:", err)
+      Alert.alert("Lỗi", "Không thể thay đổi cài đặt sinh trắc học")
+    }
+  }
+
+  const handleLogout = async () => {
     Alert.alert(
-      "Xóa tài khoản",
-      "Bạn có chắc chắn muốn xóa tài khoản? Hành động này không thể hoàn tác và tất cả dữ liệu của bạn sẽ bị xóa vĩnh viễn.",
+      "Đăng xuất",
+      "Bạn có chắc chắn muốn đăng xuất?",
       [
+        { text: "Hủy", style: "cancel" },
         {
-          text: "Hủy",
-          style: "cancel",
-        },
-        {
-          text: "Xóa tài khoản",
+          text: "Đăng xuất",
           style: "destructive",
           onPress: async () => {
             try {
-              const currentUser = auth().currentUser
-
-              if (!currentUser) {
-                throw new Error("Người dùng chưa đăng nhập")
-              }
-
-              // Delete user data from Firestore
-              await firestore().collection("users").doc(currentUser.uid).delete()
-
-              // Delete user account
-              await currentUser.delete()
-
+              await auth.signOut()
               router.replace("/(auth)/login")
             } catch (err) {
-              console.error("Error deleting account:", err)
-              Alert.alert(
-                "Lỗi",
-                "Không thể xóa tài khoản. Bạn có thể cần đăng nhập lại trước khi thực hiện hành động này.",
-                [
-                  {
-                    text: "OK",
-                  },
-                  {
-                    text: "Đăng nhập lại",
-                    onPress: handleLogout,
-                  },
-                ],
-              )
+              console.error("Error signing out:", err)
+              Alert.alert("Lỗi", "Không thể đăng xuất. Vui lòng thử lại.")
             }
-          },
-        },
-      ],
-    )
-  }
-
-  const handleChangePassword = () => {
-    Alert.prompt(
-      "Đổi mật khẩu",
-      "Nhập địa chỉ email của bạn để nhận liên kết đặt lại mật khẩu",
-      [
-        {
-          text: "Hủy",
-          style: "cancel",
-        },
-        {
-          text: "Gửi",
-          onPress: async (email) => {
-            if (!email) {
-              Alert.alert("Lỗi", "Vui lòng nhập địa chỉ email")
-              return
-            }
-
-            try {
-              await auth().sendPasswordResetEmail(email)
-              Alert.alert("Thành công", "Liên kết đặt lại mật khẩu đã được gửi đến email của bạn")
-            } catch (err) {
-              console.error("Error sending password reset email:", err)
-              Alert.alert("Lỗi", "Không thể gửi email đặt lại mật khẩu. Vui lòng kiểm tra lại địa chỉ email.")
-            }
-          },
-        },
-      ],
-      "plain-text",
-      user?.email || "",
-    )
-  }
-
-  const toggleSwitch = (field: string, section?: string) => {
-    if (!user) return
-
-    if (section === "privacy") {
-      setUpdatedUser({
-        ...updatedUser,
-        privacySettings: {
-          ...user.privacySettings,
-          ...updatedUser.privacySettings,
-          [field]: !(updatedUser.privacySettings?.[field] ?? user.privacySettings[field]),
-        },
-      })
-    } else {
-      setUpdatedUser({
-        ...updatedUser,
-        [field]: !(updatedUser[field] ?? user[field]),
-      })
-    }
-  }
-
-  const renderProfileSection = () => {
-    if (!user) return null
-
-    const displayName = updatedUser.displayName ?? user.displayName
-    const email = updatedUser.email ?? user.email
-    const phoneNumber = updatedUser.phoneNumber ?? user.phoneNumber
-    const studentId = updatedUser.studentId ?? user.studentId
-    const department = updatedUser.department ?? user.department
-    const photoURL = updatedUser.photoURL ?? user.photoURL
-
-    return (
-      <Animated.View
-        style={[
-          styles.sectionContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY }],
-          },
-        ]}
-      >
-        <View style={styles.profileHeader}>
-          <TouchableOpacity
-            style={styles.profileImageContainer}
-            onPress={editMode ? handlePickImage : undefined}
-            activeOpacity={editMode ? 0.7 : 1}
-          >
-            {photoURL ? (
-              <Image source={{ uri: photoURL }} style={styles.profileImage} />
-            ) : (
-              <View style={[styles.profileImage, styles.profileImagePlaceholder]}>
-                <Ionicons name="person" size={50} color="#FFFFFF" />
-              </View>
-            )}
-            {editMode && (
-              <View style={styles.editImageButton}>
-                <Ionicons name="camera" size={16} color="#FFFFFF" />
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.profileInfo}>
-            {editMode ? (
-              <TextInput
-                style={styles.nameInput}
-                value={displayName}
-                onChangeText={(text) => setUpdatedUser({ ...updatedUser, displayName: text })}
-                placeholder="Nhập tên của bạn"
-                placeholderTextColor="#999"
-              />
-            ) : (
-              <Text style={styles.profileName}>{displayName || "Chưa cập nhật"}</Text>
-            )}
-            <Text style={styles.profileEmail}>{email}</Text>
-          </View>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.formGroup}>
-          <Text style={styles.formLabel}>Mã số sinh viên</Text>
-          {editMode ? (
-            <TextInput
-              style={styles.formInput}
-              value={studentId}
-              onChangeText={(text) => setUpdatedUser({ ...updatedUser, studentId: text })}
-              placeholder="Nhập mã số sinh viên"
-              placeholderTextColor="#999"
-              keyboardType="number-pad"
-            />
-          ) : (
-            <Text style={styles.formValue}>{studentId || "Chưa cập nhật"}</Text>
-          )}
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.formLabel}>Khoa/Ngành</Text>
-          {editMode ? (
-            <TextInput
-              style={styles.formInput}
-              value={department}
-              onChangeText={(text) => setUpdatedUser({ ...updatedUser, department: text })}
-              placeholder="Nhập khoa/ngành của bạn"
-              placeholderTextColor="#999"
-            />
-          ) : (
-            <Text style={styles.formValue}>{department || "Chưa cập nhật"}</Text>
-          )}
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.formLabel}>Số điện thoại</Text>
-          {editMode ? (
-            <TextInput
-              style={styles.formInput}
-              value={phoneNumber}
-              onChangeText={(text) => setUpdatedUser({ ...updatedUser, phoneNumber: text })}
-              placeholder="Nhập số điện thoại"
-              placeholderTextColor="#999"
-              keyboardType="phone-pad"
-            />
-          ) : (
-            <Text style={styles.formValue}>{phoneNumber || "Chưa cập nhật"}</Text>
-          )}
-        </View>
-
-        {editMode && (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.cancelButton]}
-              onPress={() => {
-                setEditMode(false)
-                setUpdatedUser({})
-              }}
-              disabled={isSaving}
-            >
-              <Text style={styles.cancelButtonText}>Hủy</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, styles.saveButton]}
-              onPress={handleSaveProfile}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.saveButtonText}>Lưu thay đổi</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {!editMode && (
-          <TouchableOpacity style={styles.editButton} onPress={() => setEditMode(true)}>
-            <Ionicons name="create-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.editButtonText}>Chỉnh sửa thông tin</Text>
-          </TouchableOpacity>
-        )}
-      </Animated.View>
-    )
-  }
-
-  const renderSettingsSection = () => {
-    if (!user) return null
-
-    const notificationsEnabled = updatedUser.notificationsEnabled ?? user.notificationsEnabled
-    const darkModeEnabled = updatedUser.darkModeEnabled ?? user.darkModeEnabled
-    const biometricEnabled = updatedUser.biometricEnabled ?? user.biometricEnabled
-
-    return (
-      <Animated.View
-        style={[
-          styles.sectionContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY }],
-          },
-        ]}
-      >
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="notifications-outline" size={24} color="#007AFF" style={styles.settingIcon} />
-            <Text style={styles.settingText}>Thông báo</Text>
-          </View>
-          <Switch
-            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
-            thumbColor="#FFFFFF"
-            ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("notificationsEnabled")}
-            value={notificationsEnabled}
-          />
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="moon-outline" size={24} color="#007AFF" style={styles.settingIcon} />
-            <Text style={styles.settingText}>Chế độ tối</Text>
-          </View>
-          <Switch
-            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
-            thumbColor="#FFFFFF"
-            ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("darkModeEnabled")}
-            value={darkModeEnabled}
-          />
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="finger-print-outline" size={24} color="#007AFF" style={styles.settingIcon} />
-            <Text style={styles.settingText}>Đăng nhập sinh trắc học</Text>
-          </View>
-          <Switch
-            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
-            thumbColor="#FFFFFF"
-            ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("biometricEnabled")}
-            value={biometricEnabled}
-          />
-        </View>
-
-        <TouchableOpacity style={styles.settingButton} onPress={handleSaveProfile} disabled={isSaving}>
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <Ionicons name="save-outline" size={18} color="#FFFFFF" style={styles.buttonIcon} />
-              <Text style={styles.settingButtonText}>Lưu cài đặt</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </Animated.View>
-    )
-  }
-
-  const renderPrivacySection = () => {
-    if (!user) return null
-
-    const privacySettings = {
-      ...user.privacySettings,
-      ...updatedUser.privacySettings,
-    }
-
-    return (
-      <Animated.View
-        style={[
-          styles.sectionContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY }],
-          },
-        ]}
-      >
-        <Text style={styles.sectionDescription}>Quản lý thông tin cá nhân được hiển thị cho người dùng khác</Text>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="mail-outline" size={24} color="#007AFF" style={styles.settingIcon} />
-            <Text style={styles.settingText}>Hiển thị email</Text>
-          </View>
-          <Switch
-            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
-            thumbColor="#FFFFFF"
-            ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("showEmail", "privacy")}
-            value={privacySettings.showEmail}
-          />
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="call-outline" size={24} color="#007AFF" style={styles.settingIcon} />
-            <Text style={styles.settingText}>Hiển thị số điện thoại</Text>
-          </View>
-          <Switch
-            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
-            thumbColor="#FFFFFF"
-            ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("showPhone", "privacy")}
-            value={privacySettings.showPhone}
-          />
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="calendar-outline" size={24} color="#007AFF" style={styles.settingIcon} />
-            <Text style={styles.settingText}>Hiển thị hoạt động tham gia</Text>
-          </View>
-          <Switch
-            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
-            thumbColor="#FFFFFF"
-            ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("showActivities", "privacy")}
-            value={privacySettings.showActivities}
-          />
-        </View>
-
-        <TouchableOpacity style={styles.settingButton} onPress={handleSaveProfile} disabled={isSaving}>
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <Ionicons name="save-outline" size={18} color="#FFFFFF" style={styles.buttonIcon} />
-              <Text style={styles.settingButtonText}>Lưu cài đặt</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </Animated.View>
-    )
-  }
-
-  const renderSecuritySection = () => {
-    return (
-      <Animated.View
-        style={[
-          styles.sectionContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY }],
-          },
-        ]}
-      >
-        <Text style={styles.sectionDescription}>Quản lý bảo mật tài khoản và quyền truy cập</Text>
-
-        <TouchableOpacity style={styles.securityButton} onPress={handleChangePassword}>
-          <View style={styles.securityButtonContent}>
-            <Ionicons name="key-outline" size={24} color="#007AFF" style={styles.securityIcon} />
-            <View style={styles.securityTextContainer}>
-              <Text style={styles.securityButtonText}>Đổi mật khẩu</Text>
-              <Text style={styles.securityButtonDescription}>Cập nhật mật khẩu đăng nhập của bạn</Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#999" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.securityButton}
-          onPress={() => Alert.alert("Thông báo", "Tính năng này sẽ sớm được cập nhật")}
-        >
-          <View style={styles.securityButtonContent}>
-            <Ionicons name="shield-checkmark-outline" size={24} color="#007AFF" style={styles.securityIcon} />
-            <View style={styles.securityTextContainer}>
-              <Text style={styles.securityButtonText}>Xác thực hai yếu tố</Text>
-              <Text style={styles.securityButtonDescription}>Tăng cường bảo mật cho tài khoản</Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#999" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.securityButton}
-          onPress={() => Alert.alert("Thông báo", "Tính năng này sẽ sớm được cập nhật")}
-        >
-          <View style={styles.securityButtonContent}>
-            <Ionicons name="list-outline" size={24} color="#007AFF" style={styles.securityIcon} />
-            <View style={styles.securityTextContainer}>
-              <Text style={styles.securityButtonText}>Lịch sử đăng nhập</Text>
-              <Text style={styles.securityButtonDescription}>Xem các phiên đăng nhập gần đây</Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#999" />
-        </TouchableOpacity>
-
-        <View style={styles.dangerZone}>
-          <Text style={styles.dangerZoneTitle}>Vùng nguy hiểm</Text>
-
-          <TouchableOpacity style={styles.dangerButton} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color="#FF3B30" style={styles.dangerButtonIcon} />
-            <Text style={styles.dangerButtonText}>Đăng xuất</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.dangerButton} onPress={handleDeleteAccount}>
-            <Ionicons name="trash-outline" size={20} color="#FF3B30" style={styles.dangerButtonIcon} />
-            <Text style={styles.dangerButtonText}>Xóa tài khoản</Text>
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
+          }
+        }
+      ]
     )
   }
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.loadingContainer]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Đang tải thông tin tài khoản...</Text>
-      </View>
-    )
-  }
-
-  if (error) {
-    return (
-      <View style={[styles.container, styles.errorContainer]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-        <Ionicons name="alert-circle-outline" size={64} color="#FF3B30" />
-        <Text style={styles.errorTitle}>Đã xảy ra lỗi</Text>
-        <Text style={styles.errorMessage}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchUserData}>
-          <Text style={styles.retryButtonText}>Thử lại</Text>
-        </TouchableOpacity>
       </View>
     )
   }
@@ -733,69 +339,191 @@ const AccountManagementScreen = () => {
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
     >
-      <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-
-      <View style={[styles.header, { paddingTop: insets.top || 20 }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      
+      <View style={[styles.header, { paddingTop: insets.top }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Quản lý tài khoản</Text>
-        <View style={styles.headerRight} />
+        <Text style={styles.headerTitle}>Tài khoản</Text>
+        <TouchableOpacity onPress={() => setEditMode(!editMode)} style={styles.editButton}>
+          <Ionicons name={editMode ? "checkmark" : "create-outline"} size={24} color="#007AFF" />
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.tabContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScrollContent}>
-          <TouchableOpacity
-            style={[styles.tab, activeSection === "profile" && styles.activeTab]}
-            onPress={() => setActiveSection("profile")}
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <Animated.View 
+          style={[
+            styles.profileSection,
+            { 
+              opacity: fadeAnim,
+              transform: [{ translateY }, { scale: scaleAnim }]
+            }
+          ]}
+        >
+          <LinearGradient
+            colors={['#E3F2FD', '#BBDEFB']}
+            style={styles.avatarContainer}
           >
-            <Ionicons name="person-outline" size={20} color={activeSection === "profile" ? "#007AFF" : "#666"} />
-            <Text style={[styles.tabText, activeSection === "profile" && styles.activeTabText]}>Hồ sơ</Text>
+            <TouchableOpacity onPress={handlePickImage} style={styles.avatarWrapper}>
+              {user?.photoURL ? (
+                <Image source={{ uri: user.photoURL }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                  <Ionicons name="person" size={48} color="#6C757D" />
+                </View>
+              )}
+              <View style={styles.avatarEditButton}>
+                <Ionicons name="camera" size={18} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+          </LinearGradient>
+
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleText}>{user?.role}</Text>
+          </View>
+
+          {editMode ? (
+            <TextInput
+              style={styles.nameInput}
+              value={updatedUser.displayName ?? user?.displayName}
+              onChangeText={(text) => setUpdatedUser({ ...updatedUser, displayName: text })}
+              placeholder="Nhập tên của bạn"
+            />
+          ) : (
+            <Text style={styles.userName}>{user?.displayName}</Text>
+          )}
+          <Text style={styles.userEmail}>{user?.email}</Text>
+
+          <View style={styles.statsContainer}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{user?.eventsJoined || 0}</Text>
+              <Text style={styles.statLabel}>Sự kiện đã tham gia</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{user?.points || 0}</Text>
+              <Text style={styles.statLabel}>Điểm tích lũy</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoSection}>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Mã số sinh viên</Text>
+              {editMode ? (
+                <TextInput
+                  style={styles.infoInput}
+                  value={updatedUser.email ?? user?.email}
+                  onChangeText={(text) => setUpdatedUser({ ...updatedUser, email: text })}
+                  placeholder="Nhập MSSV"
+                />
+              ) : (
+                <Text style={styles.infoValue}>{user?.email || "Chưa cập nhật"}</Text>
+              )}
+            </View>
+
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Khoa/Ngành</Text>
+              {editMode ? (
+                <TextInput
+                  style={styles.infoInput}
+                  value={updatedUser.department ?? user?.department}
+                  onChangeText={(text) => setUpdatedUser({ ...updatedUser, department: text })}
+                  placeholder="Nhập khoa/ngành"
+                />
+              ) : (
+                <Text style={styles.infoValue}>{user?.department || "Chưa cập nhật"}</Text>
+              )}
+            </View>
+          </View>
+
+          {editMode && (
+            <TouchableOpacity style={styles.saveButton} onPress={handleUpdateProfile}>
+              {isSaving ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.saveButtonText}>Lưu thay đổi</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </Animated.View>
+
+        <View style={styles.settingsSection}>
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => {
+              Alert.prompt(
+                "Đổi mật khẩu",
+                "Nhập mật khẩu hiện tại",
+                [
+                  { text: "Hủy", style: "cancel" },
+                  {
+                    text: "Tiếp tục",
+                    onPress: (currentPassword) => {
+                      if (!currentPassword) return
+                      Alert.prompt(
+                        "Đổi mật khẩu",
+                        "Nhập mật khẩu mới",
+                        [
+                          { text: "Hủy", style: "cancel" },
+                          {
+                            text: "Cập nhật",
+                            onPress: (newPassword) => {
+                              if (!newPassword) return
+                              handleChangePassword(currentPassword, newPassword)
+                            }
+                          }
+                        ],
+                        "secure-text"
+                      )
+                    }
+                  }
+                ],
+                "secure-text"
+              )
+            }}
+          >
+            <View style={styles.settingContent}>
+              <Ionicons name="key-outline" size={24} color="#007AFF" />
+              <Text style={styles.settingText}>Đổi mật khẩu</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.tab, activeSection === "settings" && styles.activeTab]}
-            onPress={() => setActiveSection("settings")}
-          >
-            <Ionicons name="settings-outline" size={20} color={activeSection === "settings" ? "#007AFF" : "#666"} />
-            <Text style={[styles.tabText, activeSection === "settings" && styles.activeTabText]}>Cài đặt</Text>
-          </TouchableOpacity>
+          {biometricAvailable && (
+            <View style={styles.settingItem}>
+              <View style={styles.settingContent}>
+                <Ionicons name="finger-print-outline" size={24} color="#007AFF" />
+                <Text style={styles.settingText}>Đăng nhập sinh trắc học</Text>
+              </View>
+              <Switch
+                value={user?.biometricEnabled}
+                onValueChange={handleToggleBiometric}
+                trackColor={{ false: "#E9ECEF", true: "#007AFF" }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          )}
 
-          <TouchableOpacity
-            style={[styles.tab, activeSection === "privacy" && styles.activeTab]}
-            onPress={() => setActiveSection("privacy")}
-          >
-            <Ionicons name="eye-outline" size={20} color={activeSection === "privacy" ? "#007AFF" : "#666"} />
-            <Text style={[styles.tabText, activeSection === "privacy" && styles.activeTabText]}>Quyền riêng tư</Text>
-          </TouchableOpacity>
+          <View style={styles.settingItem}>
+            <View style={styles.settingContent}>
+              <Ionicons name="logo-google" size={24} color="#007AFF" />
+              <Text style={styles.settingText}>Liên kết Google</Text>
+            </View>
+            <Text style={styles.googleStatus}>
+              {user?.isGoogleLinked ? "Đã liên kết" : "Chưa liên kết"}
+            </Text>
+          </View>
+        </View>
 
-          <TouchableOpacity
-            style={[styles.tab, activeSection === "security" && styles.activeTab]}
-            onPress={() => setActiveSection("security")}
-          >
-            <Ionicons name="shield-outline" size={20} color={activeSection === "security" ? "#007AFF" : "#666"} />
-            <Text style={[styles.tabText, activeSection === "security" && styles.activeTabText]}>Bảo mật</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-
-      <Animated.View
-        style={[
-          styles.contentContainer,
-          {
-            transform: [{ scale: scaleAnim }],
-          },
-        ]}
-      >
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {activeSection === "profile" && renderProfileSection()}
-          {activeSection === "settings" && renderSettingsSection()}
-          {activeSection === "privacy" && renderPrivacySection()}
-          {activeSection === "security" && renderSecuritySection()}
-        </ScrollView>
-      </Animated.View>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <View style={styles.logoutButtonContent}>
+            <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
+            <Text style={styles.logoutText}>Đăng xuất</Text>
+          </View>
+        </TouchableOpacity>
+      </ScrollView>
     </KeyboardAvoidingView>
   )
 }
@@ -803,344 +531,277 @@ const AccountManagementScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F7FA",
+    backgroundColor: "#F8F9FA",
   },
   loadingContainer: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#666",
-  },
-  errorContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-    marginTop: 16,
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  retryButton: {
-    backgroundColor: "#007AFF",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
+    backgroundColor: "#F8F9FA",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E9F0",
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F0F4F8",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#1A2138",
-  },
-  headerRight: {
-    width: 40,
-  },
-  tabContainer: {
-    backgroundColor: "#FFFFFF",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E9F0",
-  },
-  tabScrollContent: {
-    paddingHorizontal: 16,
-  },
-  tab: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    marginRight: 8,
-    borderRadius: 20,
-    backgroundColor: "#F0F4F8",
-  },
-  activeTab: {
-    backgroundColor: "#E1F0FF",
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#666",
-    marginLeft: 6,
-  },
-  activeTabText: {
-    color: "#007AFF",
-    fontWeight: "600",
-  },
-  contentContainer: {
-    flex: 1,
-    padding: 16,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  sectionContainer: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    borderBottomColor: "#E9ECEF",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 10,
+    shadowRadius: 3,
     elevation: 2,
   },
-  sectionDescription: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 16,
-    lineHeight: 20,
+  backButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "#F8F9FA",
   },
-  profileHeader: {
-    flexDirection: "row",
-    alignItems: "center",
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#1A1A1A",
+  },
+  editButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "#F8F9FA",
+  },
+  content: {
+    flex: 1,
+    paddingTop: 24,
+  },
+  profileSection: {
+    backgroundColor: "#FFFFFF",
+    padding: 24,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  avatarContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignSelf: "center",
     marginBottom: 20,
+    overflow: "hidden",
   },
-  profileImageContainer: {
-    position: "relative",
-    marginRight: 16,
-  },
-  profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  profileImagePlaceholder: {
-    backgroundColor: "#007AFF",
+  avatarWrapper: {
+    width: "100%",
+    height: "100%",
     justifyContent: "center",
     alignItems: "center",
   },
-  editImageButton: {
+  avatar: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+  },
+  avatarPlaceholder: {
+    backgroundColor: "#E9ECEF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarEditButton: {
     position: "absolute",
     bottom: 0,
     right: 0,
     backgroundColor: "#007AFF",
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
     borderColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  profileInfo: {
-    flex: 1,
+  roleBadge: {
+    position: "absolute",
+    top: 24,
+    right: 24,
+    backgroundColor: "#E3F2FD",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
-  profileName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#1A2138",
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 14,
-    color: "#666",
+  roleText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#007AFF",
   },
   nameInput: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#1A2138",
-    marginBottom: 4,
-    padding: 0,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E5E9F0",
-    marginVertical: 16,
-  },
-  formGroup: {
-    marginBottom: 16,
-  },
-  formLabel: {
-    fontSize: 14,
+    fontSize: 24,
     fontWeight: "600",
-    color: "#666",
+    color: "#1A1A1A",
+    textAlign: "center",
+    padding: 12,
+    width: "100%",
+    backgroundColor: "#F8F9FA",
+    borderRadius: 12,
     marginBottom: 8,
   },
-  formValue: {
-    fontSize: 16,
-    color: "#1A2138",
-  },
-  formInput: {
-    backgroundColor: "#F5F7FA",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: "#E5E9F0",
-    color: "#1A2138",
-  },
-  actionButtons: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 20,
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cancelButton: {
-    backgroundColor: "#F0F4F8",
-    marginRight: 8,
-  },
-  cancelButtonText: {
-    color: "#666",
-    fontSize: 16,
+  userName: {
+    fontSize: 24,
     fontWeight: "600",
+    color: "#1A1A1A",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  userEmail: {
+    fontSize: 16,
+    color: "#6C757D",
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  statsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 24,
+    backgroundColor: "#F8F9FA",
+    borderRadius: 12,
+    padding: 16,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: "600",
+    color: "#007AFF",
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 14,
+    color: "#6C757D",
+  },
+  statDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: "#E9ECEF",
+    marginHorizontal: 16,
+  },
+  infoSection: {
+    width: "100%",
+    backgroundColor: "#F8F9FA",
+    borderRadius: 12,
+    padding: 16,
+  },
+  infoItem: {
+    marginBottom: 20,
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: "#6C757D",
+    marginBottom: 6,
+    fontWeight: "500",
+  },
+  infoInput: {
+    fontSize: 16,
+    color: "#1A1A1A",
+    padding: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E9ECEF",
+  },
+  infoValue: {
+    fontSize: 16,
+    color: "#1A1A1A",
+    fontWeight: "500",
   },
   saveButton: {
     backgroundColor: "#007AFF",
-    marginLeft: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginTop: 24,
+    width: "100%",
+    alignItems: "center",
+    shadowColor: "#007AFF",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   saveButtonText: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
   },
-  editButton: {
-    backgroundColor: "#007AFF",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 16,
-  },
-  editButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-    marginLeft: 8,
+  settingsSection: {
+    backgroundColor: "#FFFFFF",
+    marginTop: 24,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   settingItem: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 12,
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E9F0",
+    borderBottomColor: "#E9ECEF",
   },
-  settingInfo: {
+  settingContent: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  settingIcon: {
-    marginRight: 12,
   },
   settingText: {
     fontSize: 16,
-    color: "#1A2138",
+    marginLeft: 12,
+    color: "#1A1A1A",
+    fontWeight: "500",
   },
-  settingButton: {
-    backgroundColor: "#007AFF",
+  googleStatus: {
+    fontSize: 14,
+    color: "#6C757D",
+  },
+  logoutButton: {
+    backgroundColor: "#FFFFFF",
+    marginTop: 24,
+    marginHorizontal: 16,
+    marginBottom: 32,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  logoutButtonContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 20,
-  },
-  settingButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  buttonIcon: {
-    marginRight: 8,
-  },
-  securityButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E9F0",
-  },
-  securityButtonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  securityIcon: {
-    marginRight: 12,
-  },
-  securityTextContainer: {
-    flex: 1,
-  },
-  securityButtonText: {
-    fontSize: 16,
-    color: "#1A2138",
-    fontWeight: "500",
-  },
-  securityButtonDescription: {
-    fontSize: 12,
-    color: "#666",
-    marginTop: 2,
-  },
-  dangerZone: {
-    marginTop: 24,
     padding: 16,
-    backgroundColor: "#FFF5F5",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FFCCCC",
   },
-  dangerZoneTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#FF3B30",
-    marginBottom: 16,
-  },
-  dangerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#FFCCCC",
-  },
-  dangerButtonIcon: {
-    marginRight: 12,
-  },
-  dangerButtonText: {
+  logoutText: {
     fontSize: 16,
     color: "#FF3B30",
+    fontWeight: "600",
+    marginLeft: 8,
   },
 })
 
-export default AccountManagementScreen
+export default StudentTaiKhoan

@@ -1,22 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { getFirestore, doc, getDoc } from '@react-native-firebase/firestore';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Timestamp } from '@react-native-firebase/firestore';
+
+interface Activity {
+  id: string;
+  name: string;
+  description: string;
+  location: string;
+  startDate: Timestamp;
+  endDate: Timestamp;
+  participants?: string[];
+}
 
 const ChiTietHoatDong = () => {
-  const [activity, setActivity] = useState(null);
+  const [activity, setActivity] = useState<Activity | null>(null);
   const [loading, setLoading] = useState(true);
-  const navigation = useNavigation();
-  const route = useRoute();
-  const { activityId } = route.params;
+  const router = useRouter();
+  const { activityId } = useLocalSearchParams<{ activityId: string }>();
+  const db = getFirestore();
 
   useEffect(() => {
     const fetchActivityDetails = async () => {
+      if (!activityId) return;
+      
       try {
-        const activityDoc = await firestore().collection('activities').doc(activityId).get();
+        const activityDoc = await getDoc(doc(db, 'activities', activityId));
         if (activityDoc.exists) {
-          setActivity({ id: activityDoc.id, ...activityDoc.data() });
+          setActivity({
+            id: activityDoc.id,
+            ...activityDoc.data()
+          } as Activity);
         } else {
           console.log('No such activity!');
         }
@@ -49,7 +65,7 @@ const ChiTietHoatDong = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết hoạt động</Text>
@@ -57,17 +73,16 @@ const ChiTietHoatDong = () => {
       <ScrollView style={styles.content}>
         <Text style={styles.activityName}>{activity.name}</Text>
         <Text style={styles.activityDate}>
-          Từ: {new Date(activity.startDate.toDate()).toLocaleString()}
+          Từ: {activity.startDate.toDate().toLocaleString()}
         </Text>
         <Text style={styles.activityDate}>
-          Đến: {new Date(activity.endDate.toDate()).toLocaleString()}
+          Đến: {activity.endDate.toDate().toLocaleString()}
         </Text>
         <Text style={styles.activityDescription}>Nội dung: {activity.description}</Text>
         <Text style={styles.activityLocation}>Địa điểm: {activity.location}</Text>
         <Text style={styles.activityParticipants}>
           Số người tham gia: {activity.participants ? activity.participants.length : 0}
         </Text>
-        {/* Thêm các thông tin khác của hoạt động nếu cần */}
       </ScrollView>
     </SafeAreaView>
   );

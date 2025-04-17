@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import {
   View,
   Text,
@@ -18,8 +18,8 @@ import {
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import auth from "@react-native-firebase/auth"
-import firestore from "@react-native-firebase/firestore"
+import { getAuth } from "@react-native-firebase/auth"
+import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, deleteDoc } from "@react-native-firebase/firestore"
 import * as ImagePicker from "expo-image-picker"
 import { useRouter } from "expo-router"
 
@@ -43,6 +43,9 @@ interface UserProfile {
   }
 }
 
+type PrivacySettingKey = keyof UserProfile['privacySettings']
+type UserSettingKey = keyof Omit<UserProfile, 'privacySettings'>
+
 const AccountManagementScreen = () => {
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -53,6 +56,8 @@ const AccountManagementScreen = () => {
   const [activeSection, setActiveSection] = useState("profile")
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const auth = getAuth()
+  const db = getFirestore()
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -87,13 +92,13 @@ const AccountManagementScreen = () => {
   const fetchUserData = async () => {
     try {
       setLoading(true)
-      const currentUser = auth().currentUser
+      const currentUser = auth.currentUser
 
       if (!currentUser) {
         throw new Error("Người dùng chưa đăng nhập")
       }
 
-      const userDoc = await firestore().collection("users").doc(currentUser.uid).get()
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid))
 
       if (userDoc.exists) {
         const userData = userDoc.data() as UserProfile
@@ -136,7 +141,7 @@ const AccountManagementScreen = () => {
         setUser(defaultProfile)
 
         // Save default profile to Firestore
-        await firestore().collection("users").doc(currentUser.uid).set(defaultProfile, { merge: true })
+        await setDoc(doc(db, "users", currentUser.uid), defaultProfile, { merge: true })
       }
     } catch (err) {
       console.error("Error fetching user data:", err)
@@ -151,7 +156,7 @@ const AccountManagementScreen = () => {
 
     try {
       setIsSaving(true)
-      const currentUser = auth().currentUser
+      const currentUser = auth.currentUser
 
       if (!currentUser) {
         throw new Error("Người dùng chưa đăng nhập")
@@ -165,12 +170,9 @@ const AccountManagementScreen = () => {
       }
 
       // Update user document in Firestore
-      await firestore()
-        .collection("users")
-        .doc(currentUser.uid)
-        .update({
-          ...updatedUser,
-        })
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        ...updatedUser,
+      })
 
       // Update local state
       setUser({
@@ -233,7 +235,7 @@ const AccountManagementScreen = () => {
         style: "destructive",
         onPress: async () => {
           try {
-            await auth().signOut()
+            await auth.signOut()
             router.replace("/(auth)/login")
           } catch (err) {
             console.error("Error signing out:", err)
@@ -258,14 +260,14 @@ const AccountManagementScreen = () => {
           style: "destructive",
           onPress: async () => {
             try {
-              const currentUser = auth().currentUser
+              const currentUser = auth.currentUser
 
               if (!currentUser) {
                 throw new Error("Người dùng chưa đăng nhập")
               }
 
               // Delete user data from Firestore
-              await firestore().collection("users").doc(currentUser.uid).delete()
+              await deleteDoc(doc(db, "users", currentUser.uid))
 
               // Delete user account
               await currentUser.delete()
@@ -311,7 +313,7 @@ const AccountManagementScreen = () => {
             }
 
             try {
-              await auth().sendPasswordResetEmail(email)
+              await auth.sendPasswordResetEmail(email)
               Alert.alert("Thành công", "Liên kết đặt lại mật khẩu đã được gửi đến email của bạn")
             } catch (err) {
               console.error("Error sending password reset email:", err)
@@ -325,24 +327,28 @@ const AccountManagementScreen = () => {
     )
   }
 
-  const toggleSwitch = (field: string, section?: string) => {
-    if (!user) return
+  const handleSettingChange = (setting: UserSettingKey, value: boolean) => {
+    setUpdatedUser(prev => ({
+      ...prev,
+      [setting]: value
+    }))
+  }
 
-    if (section === "privacy") {
-      setUpdatedUser({
-        ...updatedUser,
+  const handlePrivacySettingChange = (setting: PrivacySettingKey, value: boolean) => {
+    setUpdatedUser(prev => {
+      const currentPrivacySettings = prev.privacySettings || user?.privacySettings || {
+        showEmail: true,
+        showPhone: false,
+        showActivities: true
+      }
+      return {
+        ...prev,
         privacySettings: {
-          ...user.privacySettings,
-          ...updatedUser.privacySettings,
-          [field]: !(updatedUser.privacySettings?.[field] ?? user.privacySettings[field]),
-        },
-      })
-    } else {
-      setUpdatedUser({
-        ...updatedUser,
-        [field]: !(updatedUser[field] ?? user[field]),
-      })
-    }
+          ...currentPrivacySettings,
+          [setting]: value
+        }
+      } as Partial<UserProfile>
+    })
   }
 
   const renderProfileSection = () => {
@@ -513,7 +519,7 @@ const AccountManagementScreen = () => {
             trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("notificationsEnabled")}
+            onValueChange={(value) => handleSettingChange('notificationsEnabled', value)}
             value={notificationsEnabled}
           />
         </View>
@@ -527,7 +533,7 @@ const AccountManagementScreen = () => {
             trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("darkModeEnabled")}
+            onValueChange={(value) => handleSettingChange('darkModeEnabled', value)}
             value={darkModeEnabled}
           />
         </View>
@@ -541,7 +547,7 @@ const AccountManagementScreen = () => {
             trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("biometricEnabled")}
+            onValueChange={(value) => handleSettingChange('biometricEnabled', value)}
             value={biometricEnabled}
           />
         </View>
@@ -589,7 +595,7 @@ const AccountManagementScreen = () => {
             trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("showEmail", "privacy")}
+            onValueChange={(value) => handlePrivacySettingChange('showEmail', value)}
             value={privacySettings.showEmail}
           />
         </View>
@@ -603,7 +609,7 @@ const AccountManagementScreen = () => {
             trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("showPhone", "privacy")}
+            onValueChange={(value) => handlePrivacySettingChange('showPhone', value)}
             value={privacySettings.showPhone}
           />
         </View>
@@ -617,7 +623,7 @@ const AccountManagementScreen = () => {
             trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#D1D1D6"
-            onValueChange={() => toggleSwitch("showActivities", "privacy")}
+            onValueChange={(value) => handlePrivacySettingChange('showActivities', value)}
             value={privacySettings.showActivities}
           />
         </View>

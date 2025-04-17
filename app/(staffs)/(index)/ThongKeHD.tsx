@@ -1,23 +1,48 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import firestore from '@react-native-firebase/firestore';
+import { getFirestore, collection, getDocs, Timestamp } from '@react-native-firebase/firestore';
 import { PieChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
+import { useRouter } from 'expo-router';
 
 const screenWidth = Dimensions.get('window').width;
 
-const ThongKeHoatDong = ({ }) => {
+interface Activity {
+  id: string;
+  name: string;
+  participantsCount: number;
+  startDate: Date;
+  endDate: Date;
+}
+
+interface Statistics {
+  totalActivities: number;
+  completedActivities: number;
+  ongoingActivities: number;
+  upcomingActivities: number;
+  totalParticipants: number;
+}
+
+interface StatisticCardProps {
+  title: string;
+  value: number;
+  icon: keyof typeof Ionicons.glyphMap;
+}
+
+const ThongKeHoatDong = () => {
   const [loading, setLoading] = useState(true);
-  const [statistics, setStatistics] = useState({
+  const [statistics, setStatistics] = useState<Statistics>({
     totalActivities: 0,
     completedActivities: 0,
     ongoingActivities: 0,
     upcomingActivities: 0,
     totalParticipants: 0,
   });
-  const [activities, setActivities] = useState([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const router = useRouter();
+  const db = getFirestore();
 
   useEffect(() => {
     fetchStatistics();
@@ -26,15 +51,15 @@ const ThongKeHoatDong = ({ }) => {
   const fetchStatistics = async () => {
     setLoading(true);
     try {
-      const now = firestore.Timestamp.fromDate(new Date());
-      const activitiesSnapshot = await firestore().collection('activities').get();
+      const now = Timestamp.now();
+      const activitiesSnapshot = await getDocs(collection(db, 'activities'));
 
       let totalActivities = 0;
       let completedActivities = 0;
       let ongoingActivities = 0;
       let upcomingActivities = 0;
       let totalParticipants = 0;
-      let activitiesList = [];
+      let activitiesList: Activity[] = [];
 
       activitiesSnapshot.forEach((doc) => {
         const activity = doc.data();
@@ -81,7 +106,7 @@ const ThongKeHoatDong = ({ }) => {
     { name: 'Sắp diễn ra', population: statistics.upcomingActivities, color: '#2196F3', legendFontColor: '#7F7F7F', legendFontSize: 12 },
   ];
 
-  const StatisticCard = ({ title, value, icon }) => (
+  const StatisticCard = ({ title, value, icon }: StatisticCardProps) => (
     <View style={styles.card}>
       <Ionicons name={icon} size={24} color="#007AFF" />
       <Text style={styles.cardTitle}>{title}</Text>
@@ -89,7 +114,7 @@ const ThongKeHoatDong = ({ }) => {
     </View>
   );
 
-  const renderActivityItem = ({ item }) => (
+  const renderActivityItem = ({ item }: { item: Activity }) => (
     <View style={styles.activityItem}>
       <Text style={styles.activityName}>{item.name}</Text>
       <Text style={styles.activityParticipants}>Số người tham gia: {item.participantsCount}</Text>
@@ -103,7 +128,7 @@ const ThongKeHoatDong = ({ }) => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#007AFF" />
           </TouchableOpacity>
           <Text style={styles.title}>Thống kê hoạt động</Text>

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, SafeAreaView, ActivityIndicator, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, arrayUnion, Timestamp } from '@react-native-firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
 import { useRouter } from 'expo-router';
 
 const screenWidth = Dimensions.get('window').width;
@@ -12,8 +12,8 @@ interface Activity {
   id: string;
   name: string;
   location: string;
-  startDate: FirebaseFirestoreTypes.Timestamp;
-  endDate: FirebaseFirestoreTypes.Timestamp;
+  startDate: Timestamp;
+  endDate: Timestamp;
   participants?: string[];
   pendingParticipants?: string[];
   [key: string]: any;
@@ -24,9 +24,11 @@ const HoatDongDangDienRa = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const db = getFirestore();
+  const auth = getAuth();
 
   useEffect(() => {
-    const currentUser = auth().currentUser;
+    const currentUser = auth.currentUser;
     if (currentUser) {
       setUserId(currentUser.uid);
     }
@@ -36,12 +38,13 @@ const HoatDongDangDienRa = () => {
   const fetchOngoingActivities = async () => {
     setLoading(true);
     try {
-      const now = firestore.Timestamp.now();
-      const snapshot = await firestore()
-        .collection('activities')
-        .where('startDate', '<=', now)
-        .where('endDate', '>=', now)
-        .get();
+      const now = Timestamp.now();
+      const activitiesQuery = query(
+        collection(db, 'activities'),
+        where('startDate', '<=', now),
+        where('endDate', '>=', now)
+      );
+      const snapshot = await getDocs(activitiesQuery);
       const activitiesList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -62,8 +65,8 @@ const HoatDongDangDienRa = () => {
     }
 
     try {
-      const activityRef = firestore().collection('activities').doc(activityId);
-      const activityDoc = await activityRef.get();
+      const activityRef = doc(db, 'activities', activityId);
+      const activityDoc = await getDoc(activityRef);
       const activityData = activityDoc.data() as Activity | undefined;
 
       if (!activityData) {
@@ -81,8 +84,8 @@ const HoatDongDangDienRa = () => {
         return;
       }
 
-      await activityRef.update({
-        pendingParticipants: firestore.FieldValue.arrayUnion(userId)
+      await updateDoc(activityRef, {
+        pendingParticipants: arrayUnion(userId)
       });
       Alert.alert('Thành công', 'Đăng ký thành công! Vui lòng chờ phê duyệt.');
       fetchOngoingActivities();

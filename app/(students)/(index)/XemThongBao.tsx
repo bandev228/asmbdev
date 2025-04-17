@@ -11,9 +11,9 @@ import {
   RefreshControl,
   Alert
 } from 'react-native';
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
+import { getFirestore, collection, doc, getDocs, updateDoc, onSnapshot, query, where, orderBy } from '@react-native-firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
 import { Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
@@ -22,9 +22,11 @@ interface Notification {
   id: string;
   title: string;
   message: string;
-  createdAt: FirebaseFirestoreTypes.Timestamp;
+  type: string;
+  createdAt: Date;
   read: boolean;
   isRead: boolean;
+  userId: string;
   activityId?: string;
 }
 
@@ -41,6 +43,8 @@ const ThongBao = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const auth = getAuth();
+  const db = getFirestore();
 
   // Sử dụng useFocusEffect để tải lại thông báo khi màn hình được focus
   useFocusEffect(
@@ -51,12 +55,55 @@ const ThongBao = () => {
     }, [])
   );
 
+  useEffect(() => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setError('Người dùng chưa đăng nhập');
+      setLoading(false);
+      return;
+    }
+
+    const notificationsQuery = query(
+      collection(db, 'notifications'),
+      where('userId', '==', currentUser.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(notificationsQuery, 
+      (snapshot) => {
+        const notificationsList = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            title: data.title || "Không có tiêu đề",
+            message: data.message || "Không có nội dung",
+            type: data.type || "info",
+            createdAt: data.createdAt ? new Date(data.createdAt.toDate()) : new Date(),
+            read: data.read || false,
+            isRead: data.read || false,
+            userId: data.userId || currentUser.uid,
+            activityId: data.activityId
+          } as Notification;
+        });
+        setNotifications(notificationsList);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error fetching notifications:', err);
+        setError('Không thể tải thông báo');
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   const fetchNotifications = async () => {
     setLoading(true);
     setError(null);
     try {
-      const notificationsRef = firestore().collection('notifications');
-      const querySnapshot = await notificationsRef.orderBy('createdAt', 'desc').get();
+      const notificationsRef = collection(db, 'notifications');
+      const querySnapshot = await getDocs(notificationsRef);
       
       if (querySnapshot.empty) {
         console.log("No notifications found");
@@ -72,13 +119,14 @@ const ThongBao = () => {
           
           return {
             id: doc.id,
-            ...data,
-            isRead: isRead,
-            // Đảm bảo các trường luôn có giá trị
             title: data.title || "Không có tiêu đề",
             message: data.message || "Không có nội dung",
-            createdAt: data.createdAt || firestore.Timestamp.now(),
-            read: isRead
+            type: data.type || "info",
+            createdAt: data.createdAt ? new Date(data.createdAt.toDate()) : new Date(),
+            read: isRead,
+            isRead: isRead,
+            userId: data.userId || auth.currentUser?.uid || "",
+            activityId: data.activityId
           } as Notification;
         });
         
@@ -103,30 +151,15 @@ const ThongBao = () => {
     fetchNotifications();
   };
 
-  const markAsRead = async (notificationId: string) => {
+  const handleMarkAsRead = async (notificationId: string) => {
     try {
-      console.log(`Marking notification ${notificationId} as read`);
-      const notificationRef = firestore().collection('notifications').doc(notificationId);
-      
-      // Cập nhật trạng thái đã đọc
-      await notificationRef.update({
+      const notificationRef = doc(db, 'notifications', notificationId);
+      await updateDoc(notificationRef, {
         read: true
       });
-      
-      // Cập nhật state để hiển thị thông báo đã đọc ngay lập tức
-      setNotifications(prevNotifications => 
-        prevNotifications.map(notification => 
-          notification.id === notificationId 
-            ? {...notification, isRead: true, read: true} 
-            : notification
-        )
-      );
-      
-      // Cập nhật số lượng thông báo chưa đọc
-      setUnreadCount(prevCount => Math.max(0, prevCount - 1));
-      
-    } catch (error) {
-      console.error('Error marking notification as read:', error);
+    } catch (err) {
+      console.error('Error marking notification as read:', err);
+      Alert.alert('Lỗi', 'Không thể đánh dấu thông báo đã đọc');
     }
   };
 
@@ -140,7 +173,7 @@ const ThongBao = () => {
     
     // Đánh dấu đã đọc nếu chưa đọc
     if (!notification.isRead) {
-      markAsRead(notification.id);
+      handleMarkAsRead(notification.id);
     }
     
     if (notification.activityId) {
@@ -151,13 +184,12 @@ const ThongBao = () => {
     }
   };
 
-  const getTimeAgo = (timestamp: FirebaseFirestoreTypes.Timestamp) => {
+  const getTimeAgo = (timestamp: Date) => {
     if (!timestamp) return 'Không có ngày';
     
     try {
       const now = new Date();
-      const notificationDate = timestamp.toDate();
-      const diffInSeconds = Math.floor((now.getTime() - notificationDate.getTime()) / 1000);
+      const diffInSeconds = Math.floor((now.getTime() - timestamp.getTime()) / 1000);
       
       if (diffInSeconds < 60) {
         return 'Vừa xong';
@@ -171,7 +203,7 @@ const ThongBao = () => {
         const days = Math.floor(diffInSeconds / 86400);
         return `${days} ngày trước`;
       } else {
-        return notificationDate.toLocaleDateString('vi-VN');
+        return timestamp.toLocaleDateString('vi-VN');
       }
     } catch (error) {
       console.error("Error formatting date:", error);

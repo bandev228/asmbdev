@@ -1,15 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, SafeAreaView, ActivityIndicator, StatusBar, TouchableOpacity } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
+import { getFirestore, collection, query, where, getDocs } from '@react-native-firebase/firestore';
 import { Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
 
-const QuanLySinhVien = ({ }) => {
-  const [students, setStudents] = useState([]);
+interface Activity {
+  id: string;
+  participants?: string[];
+}
+
+interface Student {
+  id: string;
+  fullname: string;
+  email: string;
+  phoneNumber?: string;
+  totalActivities: number;
+  participatedActivities: number;
+}
+
+const QuanLySinhVien = () => {
+  const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const db = getFirestore();
 
   useEffect(() => {
     fetchStudentsStatistics();
@@ -18,9 +35,14 @@ const QuanLySinhVien = ({ }) => {
   const fetchStudentsStatistics = async () => {
     setLoading(true);
     try {
-      const studentsSnapshot = await firestore().collection('users').where('role', '==', 'student').get();
-      const activitiesSnapshot = await firestore().collection('activities').get();
-      const activities = activitiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const studentsSnapshot = await getDocs(
+        query(collection(db, 'users'), where('role', '==', 'student'))
+      );
+      const activitiesSnapshot = await getDocs(collection(db, 'activities'));
+      const activities = activitiesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Activity));
 
       const studentsList = await Promise.all(studentsSnapshot.docs.map(async doc => {
         const studentData = doc.data();
@@ -31,12 +53,12 @@ const QuanLySinhVien = ({ }) => {
 
         return {
           id: doc.id,
-          fullname: studentData.fullname,
-          email: studentData.email,
+          fullname: studentData.displayName || 'Chưa cập nhật',
+          email: studentData.email || 'Chưa cập nhật',
           phoneNumber: studentData.phoneNumber,
           totalActivities,
           participatedActivities: participatedActivities.length
-        };
+        } as Student;
       }));
 
       setStudents(studentsList);
@@ -47,7 +69,7 @@ const QuanLySinhVien = ({ }) => {
     }
   };
 
-  const renderStudentItem = ({ item }) => (
+  const renderStudentItem = ({ item }: { item: Student }) => (
     <View style={styles.studentItem}>
       <Text style={styles.studentName}>{item.fullname}</Text>
       <Text style={styles.studentInfo}>Email: {item.email}</Text>
@@ -72,7 +94,7 @@ const QuanLySinhVien = ({ }) => {
         <View style={styles.container}>
           <View style={styles.header}>
             <TouchableOpacity 
-              onPress={() => navigation.goBack()} 
+              onPress={() => router.back()} 
               style={styles.backButton}
             >
               <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
@@ -99,7 +121,7 @@ const QuanLySinhVien = ({ }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity 
-            onPress={() => navigation.goBack()} 
+            onPress={() => router.back()} 
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />

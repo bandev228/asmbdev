@@ -23,8 +23,4 @@ export const ActivityProvider = ({ children }: { children: ReactNode }) => {
 export const useActivity = () => {
   return useContext(ActivityContext)
 }
-
-// Thêm default export để tránh lỗi Expo Router
-export default function ActivityContextWrapper() {
-  return null;
-}
+export default ActivityContext;

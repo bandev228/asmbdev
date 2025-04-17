@@ -16,19 +16,19 @@ export default function IndexLayout() {
       }}
       />
       <Stack.Screen
-      name="DangKyHD"
+      name="HoiDapAI"
       options={{
         headerShown: false,
         presentation: "card",
       }}
       />
-      {/* <Stack.Screen
-      name="DiemDanhHD"
+      <Stack.Screen
+      name="TaiLieuSH"
       options={{
         headerShown: false,
         presentation: "card",
       }}
-      /> */}
+      />
       <Stack.Screen
       name="HDDangDienRa"
       options={{
@@ -99,13 +99,13 @@ export default function IndexLayout() {
           presentation: "card",
         }}
       />
-      <Stack.Screen
+      {/* <Stack.Screen
         name="StudentTaiKhoan"
         options={{
           headerShown: false,
           presentation: "card",
         }}
-      />
+      /> */}
     </Stack>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useCallback, useEffect } from "react"
 import {
   View,
   Text,
@@ -11,267 +11,96 @@ import {
   Dimensions,
   RefreshControl,
   Platform,
-  Animated,
   StatusBar,
-  Image,
-  TextInput,
   FlatList,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { 
-  getAuth, 
-  signOut as firebaseSignOut 
-} from "@react-native-firebase/auth"
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  query, 
-  where, 
-  orderBy, 
-  limit, 
-  serverTimestamp,
-  terminate,
-  onSnapshot,
-  type QuerySnapshot,
-  type DocumentData
-} from "@react-native-firebase/firestore"
-import AsyncStorage from "@react-native-async-storage/async-storage"
+import { getAuth } from "@react-native-firebase/auth"
 import { useRouter } from "expo-router"
+import { GoogleSignin } from "@react-native-google-signin/google-signin"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+import { getFirestore, collection, doc, getDoc, updateDoc, onSnapshot, query, where, orderBy } from "@react-native-firebase/firestore"
 import { useFocusEffect } from "@react-navigation/native"
-import { GoogleSignin } from '@react-native-google-signin/google-signin'
 
-const { width, height } = Dimensions.get("window")
+// Custom hooks
+import { useStudentProfile } from "./hooks/useStudentProfile"
+import { useStudentStats } from "./hooks/useStudentStats"
+import { useUpcomingEvents } from "./hooks/useUpcomingEvents"
+
+// Components
+import { StatCard } from "./components/StatCard"
+import { NavigationButton } from "./components/NavigationButton"
+import { EventCard } from "./components/EventCard"
+import { SearchBar } from "./components/SearchBar"
+import { ProfileHeader } from "./components/ProfileHeader"
+
+interface User {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  role: string;
+  studentId?: string;
+  class?: string;
+  faculty?: string;
+  department?: string;
+}
+
+const { width } = Dimensions.get("window")
 const isTablet = width > 768
 
-interface DashboardButtonProps {
-  title: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  color?: string;
-}
-
-interface StatCardProps {
-  value: number;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  fadeAnim: Animated.Value;
-  translateY: Animated.Value;
-}
-
-interface Event {
-  id: string;
-  title: string;
-  date: Date;
-  location: string;
-  isParticipating: boolean;
-}
-
-interface AnimationItem {
-  fade: Animated.Value;
-  translateX: Animated.Value;
-}
-
-interface UserData {
-  displayName?: string;
-  email?: string;
-  photoURL?: string;
-  [key: string]: any;
-}
-
-interface UserProfile {
-  displayName: string;
-  email: string;
-  photoURL: string;
-  studentId: string;
-  faculty: string;
-  class: string;
-}
-
-// Tách DashboardButton ra khỏi component chính để tránh lỗi hooks
-const DashboardButton = ({ title, icon, onPress, color = "#007AFF" }: DashboardButtonProps) => {
-  // Animation for button press
-  const scaleAnim = useRef(new Animated.Value(1)).current
-
-  const onPressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.95,
-      useNativeDriver: true,
-    }).start()
-  }
-
-  const onPressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      friction: 4,
-      tension: 40,
-      useNativeDriver: true,
-    }).start()
-  }
-
-  return (
-    <Animated.View style={[styles.dashboardButtonContainer, { transform: [{ scale: scaleAnim }] }]}>
-      <TouchableOpacity
-        style={[styles.dashboardButton, { borderLeftColor: color }]}
-        onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        activeOpacity={0.7}
-      >
-        <Ionicons name={icon} size={24} color={color} />
-        <Text style={[styles.dashboardButtonText, { color: "#333" }]}>{title}</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  )
-}
-
-// Tách StatCard ra khỏi component chính
-const StatCard = ({ value, label, icon, color, fadeAnim, translateY }: StatCardProps) => (
-  <Animated.View
-    style={[
-      styles.statItem,
-      {
-        opacity: fadeAnim,
-        transform: [{ translateY }],
-      },
-    ]}
-  >
-    <View style={[styles.statIconContainer, { backgroundColor: `${color}20` }]}>
-      <Ionicons name={icon} size={24} color={color} />
-    </View>
-    <Text style={[styles.statValue, { color }]}>{value}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
-  </Animated.View>
-)
-
-const safeToDate = (timestamp: any): Date | null => {
-  try {
-    if (!timestamp) return null;
-    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate();
-    }
-    if (timestamp instanceof Date) {
-      return timestamp;
-    }
-    return new Date(timestamp);
-  } catch (error) {
-    console.error('Error converting timestamp:', error);
-    return null;
-  }
-};
-
-const formatDate = (date: Date | null): string => {
-  if (!date) return 'N/A';
-  try {
-    return date.toLocaleDateString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  } catch (error) {
-    console.error('Error formatting date:', error);
-    return 'N/A';
-  }
-};
-
-export default function StudentDashboard() {
+const StudentDashboard = () => {
   const router = useRouter()
-  const [statistics, setStatistics] = useState({
-    participatedCount: 0,
-    completedCount: 0,
-    totalHours: 0,
-    pendingCount: 0,
-  })
-  const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [showSearch, setShowSearch] = useState(false)
-  const [filteredEvents, setFilteredEvents] = useState<Event[]>([])
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-
-  // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current
-  const translateY = useRef(new Animated.Value(50)).current
-
-  // Tạo mảng để lưu trữ animation values cho danh sách sự kiện
-  const itemAnimations = useRef<AnimationItem[]>([])
-
-  // Thêm biến để theo dõi nếu component đã unmount
-  const isMounted = useRef(true)
-
-  // Khởi tạo Firebase services
   const auth = getAuth()
   const db = getFirestore()
 
-  // Khởi tạo animation values cho danh sách sự kiện
-  useEffect(() => {
-    if (upcomingEvents.length > 0 && itemAnimations.current.length === 0) {
-      upcomingEvents.forEach((_, index) => {
-        itemAnimations.current[index] = {
-          fade: new Animated.Value(0),
-          translateX: new Animated.Value(50),
-        }
-      })
+  // State
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [refreshing, setRefreshing] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-      // Animate each item
-      upcomingEvents.forEach((_, index) => {
-        Animated.parallel([
-          Animated.timing(itemAnimations.current[index].fade, {
-            toValue: 1,
-            duration: 500,
-            delay: index * 100,
-            useNativeDriver: true,
-          }),
-          Animated.timing(itemAnimations.current[index].translateX, {
-            toValue: 0,
-            duration: 500,
-            delay: index * 100,
-            useNativeDriver: true,
-          }),
-        ]).start()
-      })
+  // Custom hooks
+  const { profile, loading: profileLoading } = useStudentProfile()
+  const { stats, loading: statsLoading, refreshStats } = useStudentStats()
+  const { events: upcomingEvents, loading: eventsLoading, refreshEvents, filterEvents } = useUpcomingEvents(5)
+
+  // Derived state
+  const filteredEvents = searchQuery.trim() ? filterEvents(searchQuery) : upcomingEvents
+
+  const loadingState = profileLoading || statsLoading || eventsLoading
+
+  // Handlers
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+
+    try {
+      await Promise.all([refreshStats(), refreshEvents()])
+    } finally {
+      setRefreshing(false)
     }
-  }, [upcomingEvents])
+  }, [refreshStats, refreshEvents])
 
-  useEffect(() => {
-    // Thiết lập isMounted khi component mount
-    isMounted.current = true
+  const handleSearch = (text: string) => {
+    setSearchQuery(text)
+  }
 
-    // Start entrance animation
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-    ]).start()
+  const handleEventPress = (id: string) => {
+    router.push({
+      pathname: "./(students)/activity",
+      params: { id: id },
+    })
+  }
 
-    // Tải dữ liệu ban đầu
-    fetchData()
-
-    // Cleanup khi component unmount
-    return () => {
-      isMounted.current = false
-    }
-  }, [])
-
-  // Sửa lại useFocusEffect để tránh gọi nhiều lần
+  // Refresh data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       let isActive = true
 
-      if (isActive) {
-        fetchData()
+      if (isActive && !loading && !refreshing) {
+        handleRefresh()
       }
 
       return () => {
@@ -280,197 +109,34 @@ export default function StudentDashboard() {
     }, []),
   )
 
-  const fetchData = async () => {
-    if (!isMounted.current) return
+  useEffect(() => {
+    const currentUser = auth.currentUser
+    if (!currentUser) {
+      setError('Người dùng chưa đăng nhập')
+      setLoading(false)
+      return
+    }
 
-    setLoading(true)
-    setError(null)
-
-    try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout fetching data")), 15000),
-      )
-
-      await Promise.race([Promise.all([fetchStatistics(), fetchUpcomingEvents(), fetchUserProfile()]), timeoutPromise])
-    } catch (error) {
-      console.error("Error fetching dashboard data:", error)
-      if (error instanceof Error) {
-        setError(error.message)
-      } else {
-        setError("An unknown error occurred")
-      }
-
-      setStatistics({
-        participatedCount: 0,
-        completedCount: 0,
-        totalHours: 0,
-        pendingCount: 0,
-      })
-
-      setUpcomingEvents([])
-      setFilteredEvents([])
-
-      if (isMounted.current) {
-        Alert.alert("Lỗi kết nối", "Không thể tải dữ liệu. Vui lòng kiểm tra kết nối mạng và thử lại.", [
-          { text: "OK" },
-        ])
-      }
-    } finally {
-      if (isMounted.current) {
+    const userRef = doc(db, 'users', currentUser.uid)
+    const unsubscribe = onSnapshot(userRef, 
+      (doc) => {
+        if (doc.exists) {
+          const userData = doc.data() as User
+          setUser(userData)
+        } else {
+          setError('Không tìm thấy thông tin người dùng')
+        }
+        setLoading(false)
+      },
+      (err) => {
+        console.error('Error fetching user data:', err)
+        setError('Không thể tải thông tin người dùng')
         setLoading(false)
       }
-    }
-  }
+    )
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true)
-    try {
-      await fetchData()
-    } finally {
-      if (isMounted.current) {
-        setRefreshing(false)
-      }
-    }
+    return () => unsubscribe()
   }, [])
-
-  const fetchUserProfile = async () => {
-    try {
-      const userId = auth.currentUser?.uid;
-      if (!userId) throw new Error("User not authenticated");
-
-      const userDocRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userDocRef);
-      const userData = userDoc.data() as UserData | undefined;
-
-      if (userData && isMounted.current) {
-        setUserProfile({
-          displayName: userData.displayName || 'User',
-          email: userData.email || 'user@example.com',
-          photoURL: userData.photoURL || 'https://example.com/user-profile.jpg',
-          studentId: userData.studentId || 'Chưa cập nhật',
-          faculty: userData.faculty || 'Chưa cập nhật',
-          class: userData.class || 'Chưa cập nhật',
-        });
-      }
-    } catch (error) {
-      console.error("Error fetching user profile:", error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError("An unknown error occurred");
-      }
-    }
-  };
-
-  const fetchStatistics = async () => {
-    try {
-      const userId = auth.currentUser?.uid
-      if (!userId) throw new Error("User not authenticated")
-
-      const activitiesPromise = Promise.race([
-        getDocs(collection(db, "activities")),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout fetching activities")), 10000)),
-      ])
-
-      const activitiesSnapshot = await activitiesPromise as QuerySnapshot<DocumentData>
-
-      let participatedCount = 0
-      let completedCount = 0
-      let pendingCount = 0
-      let totalHours = 0
-
-      activitiesSnapshot.docs.forEach((doc: any) => {
-        const data = doc.data()
-        if (data.participants && Array.isArray(data.participants) && data.participants.includes(userId)) {
-          participatedCount++
-
-          const now = new Date()
-          const endDate = safeToDate(data.endDate)
-          const startDate = safeToDate(data.startDate)
-
-          if (endDate && endDate < now) {
-            completedCount++
-          } else if (startDate && startDate > now) {
-            pendingCount++
-          }
-
-          if (data.duration && typeof data.duration === "number") {
-            totalHours += data.duration
-          }
-        }
-      })
-
-      if (isMounted.current) {
-        setStatistics({
-          participatedCount,
-          completedCount,
-          totalHours,
-          pendingCount,
-        })
-      }
-    } catch (error) {
-      console.error("Error fetching statistics:", error)
-      throw error
-    }
-  }
-
-  const fetchUpcomingEvents = async () => {
-    try {
-      const userId = auth.currentUser?.uid;
-      if (!userId) throw new Error("User not authenticated");
-
-      const now = new Date();
-
-      const eventsQuery = query(
-        collection(db, "activities"),
-        where("startDate", ">", now),
-        orderBy("startDate", "asc"),
-        limit(5)
-      );
-      
-      const eventsSnapshot = await getDocs(eventsQuery);
-
-      const upcomingEventsData: Event[] = eventsSnapshot.docs.map((doc) => {
-        const data = doc.data();
-        const startDate = safeToDate(data.startDate) || new Date();
-        return {
-          id: doc.id,
-          title: data.name || "Sự kiện không tên",
-          date: startDate,
-          location: data.location || "Chưa cập nhật",
-          isParticipating:
-            data.participants && Array.isArray(data.participants) && data.participants.includes(userId),
-        };
-      });
-
-      if (isMounted.current) {
-        setUpcomingEvents(upcomingEventsData);
-        setFilteredEvents(upcomingEventsData);
-      }
-    } catch (error) {
-      console.error("Error fetching upcoming events:", error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError("An unknown error occurred");
-      }
-    }
-  };
-
-  const handleSearch = (text: string) => {
-    setSearchQuery(text);
-    if (text.trim() === "") {
-      setFilteredEvents(upcomingEvents);
-      return;
-    }
-
-    const filtered = upcomingEvents.filter(
-      (event) =>
-        event.title.toLowerCase().includes(text.toLowerCase()) ||
-        event.location.toLowerCase().includes(text.toLowerCase())
-    );
-    setFilteredEvents(filtered);
-  };
 
   const logout = async () => {
     Alert.alert("Xác nhận đăng xuất", "Bạn có chắc chắn muốn đăng xuất?", [
@@ -482,340 +148,216 @@ export default function StudentDashboard() {
         text: "Đăng xuất",
         onPress: async () => {
           try {
-            setLoading(true)
-            
-            // Thực hiện các thao tác đăng xuất song song để tối ưu thời gian
-            await Promise.all([
-              // 1. Clear local states
-              (async () => {
-                setStatistics({
-                  participatedCount: 0,
-                  completedCount: 0,
-                  totalHours: 0,
-                  pendingCount: 0,
-                })
-                setUpcomingEvents([])
-                setFilteredEvents([])
-                setUserProfile(null)
-              })(),
+            // Clear local states and storage
+            const storageKeys = [
+              "fcmToken",
+              "userSettings",
+              "lastNotificationCheck",
+              "cachedUserProfile",
+              "activityHistory",
+              "@googleSignInCredentials",
+              "student_stats",
+              "upcoming_events_5",
+            ]
 
-              // 2. Clear storage và terminate Firestore
-              (async () => {
-                const storageKeys = [
-                  'fcmToken',
-                  'userSettings',
-                  'lastNotificationCheck',
-                  'cachedUserProfile',
-                  'activityHistory',
-                  '@googleSignInCredentials'
-                ];
-                await AsyncStorage.multiRemove(storageKeys);
-                await terminate(db);
-              })(),
+            await AsyncStorage.multiRemove(storageKeys)
 
-              // 3. Đăng xuất khỏi Google (nếu đang sử dụng)
-              (async () => {
-                try {
-                  const currentUser = auth.currentUser;
-                  if (currentUser?.providerData?.some(provider => provider.providerId === 'google.com')) {
-                    await GoogleSignin.signOut();
-                    await GoogleSignin.revokeAccess();
-                  }
-                } catch (error) {
-                  console.warn("Google sign out error:", error);
-                  // Không throw error vì đây không phải lỗi nghiêm trọng
-                }
-              })(),
+            // Sign out from Google if using Google Sign-In
+            try {
+              const currentUser = auth.currentUser
+              if (currentUser?.providerData?.some((provider) => provider.providerId === "google.com")) {
+                await GoogleSignin.signOut()
+              }
+            } catch (error) {
+              console.warn("Google sign out error:", error)
+            }
 
-              // 4. Đăng xuất khỏi Firebase
-              (async () => {
-                try {
-                  // Hủy đăng ký các listeners
-                  const unsubscribeRef = onSnapshot(collection(db, 'notifications'), () => {});
-                  unsubscribeRef();
-                  
-                  // Đăng xuất
-                  await firebaseSignOut(auth);
-                } catch (error: any) {
-                  throw new Error('Không thể đăng xuất khỏi Firebase: ' + (error?.message || 'Unknown error'));
-                }
-              })()
-            ]);
+            // Sign out from Firebase
+            await auth.signOut()
 
-            // Chuyển hướng ngay lập tức sau khi đăng xuất thành công
-            router.replace("/(auth)/login");
-            
-          } catch (error: any) {
-            console.error("Error during logout:", error);
-            Alert.alert(
-              "Lỗi đăng xuất",
-              "Không thể đăng xuất hoàn toàn. Vui lòng thử lại: " + (error?.message || ''),
-              [{ text: "OK" }]
-            );
-          } finally {
-            setLoading(false);
+            // Navigate to login screen
+            router.replace("/(auth)/login")
+          } catch (error) {
+            console.error("Error during logout:", error)
+            Alert.alert("Lỗi đăng xuất", "Không thể đăng xuất hoàn toàn. Vui lòng thử lại.", [{ text: "OK" }])
           }
         },
         style: "destructive",
       },
-    ]);
-  };
-
-  const renderEventItem = ({ item }: { item: Event }) => {
-    const formattedDate = formatDate(item.date)
-
-    // Sử dụng animation values đã được tạo trước đó
-    const itemAnim = itemAnimations.current[upcomingEvents.indexOf(item)] || { fade: new Animated.Value(1), translateX: new Animated.Value(0) }
-
-    return (
-      <Animated.View
-        style={[
-          styles.eventItem,
-          {
-            opacity: itemAnim.fade,
-            transform: [{ translateX: itemAnim.translateX }],
-            borderLeftColor: item.isParticipating ? "#4CAF50" : "#007AFF",
-          },
-        ]}
-      >
-        <TouchableOpacity 
-          onPress={() => router.push({
-            pathname: "./(students)/activity",
-            params: { id: item.id }
-          })} 
-          activeOpacity={0.7}
-        >
-          <Text style={styles.eventTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <View style={styles.eventInfoRow}>
-            <Ionicons name="calendar-outline" size={16} color="#666" />
-            <Text style={styles.eventInfo}>{formattedDate}</Text>
-          </View>
-          <View style={styles.eventInfoRow}>
-            <Ionicons name="location-outline" size={16} color="#666" />
-            <Text style={styles.eventInfo} numberOfLines={1}>
-              {item.location}
-            </Text>
-          </View>
-          {item.isParticipating && (
-            <View style={styles.participatingBadge}>
-              <Text style={styles.participatingText}>Đã đăng ký</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </Animated.View>
-    )
+    ])
   }
 
-  // Thêm nút Retry khi có lỗi
-  if (error) {
-    return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
-        <Ionicons name="cloud-offline-outline" size={48} color="#F44336" />
-        <Text style={styles.errorText}>Không thể tải dữ liệu</Text>
-        <Text style={styles.errorSubText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
-          <Text style={styles.retryButtonText}>Thử lại</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    )
-  }
-
-  // Thêm nút Skip loading để người dùng có thể bỏ qua màn hình loading
+  // Loading state
   if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
-        <TouchableOpacity style={styles.skipButton} onPress={() => setLoading(false)}>
-          <Text style={styles.skipButtonText}>Bỏ qua</Text>
-        </TouchableOpacity>
+        <StatusBar barStyle="light-content" backgroundColor="#3949AB" />
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color="#5C6BC0" />
+          <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
+          <TouchableOpacity
+            style={styles.skipButton}
+            onPress={() => {
+              // Force skip loading
+              refreshStats()
+              refreshEvents()
+            }}
+          >
+            <Text style={styles.skipButtonText}>Bỏ qua</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     )
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
+      <StatusBar barStyle="light-content" backgroundColor="#3949AB" />
+
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeftSection}>
-          <Ionicons name="school-outline" size={24} color="#007AFF" />
-          <Text style={styles.headerText}>Student Dashboard</Text>
+          <Ionicons name="school-outline" size={24} color="#FFF" />
+          <Text style={styles.headerText}>SAM-APP TDMU</Text>
         </View>
         <View style={styles.headerRightSection}>
           <TouchableOpacity onPress={() => setShowSearch(!showSearch)} style={styles.headerButton}>
-            <Ionicons name={showSearch ? "close-outline" : "search-outline"} size={24} color="#007AFF" />
+            <Ionicons name={showSearch ? "close-outline" : "search-outline"} size={22} color="#FFF" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={onRefresh} style={styles.headerButton}>
-            <Ionicons name="refresh-outline" size={24} color="#007AFF" />
+          <TouchableOpacity onPress={handleRefresh} style={styles.headerButton}>
+            <Ionicons name="refresh-outline" size={22} color="#FFF" />
           </TouchableOpacity>
           <TouchableOpacity onPress={logout} style={styles.headerButton}>
-            <Ionicons name="log-out-outline" size={24} color="#007AFF" />
+            <Ionicons name="log-out-outline" size={22} color="#FFF" />
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* Search Bar */}
       {showSearch && (
-        <Animated.View
-          style={[
-            styles.searchContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY }],
-            },
-          ]}
-        >
-          <View style={styles.searchInputContainer}>
-            <Ionicons name="search-outline" size={20} color="#999" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Tìm kiếm sự kiện..."
-              value={searchQuery}
-              onChangeText={handleSearch}
-              placeholderTextColor="#999"
-              autoFocus
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => handleSearch("")}>
-                <Ionicons name="close-circle" size={20} color="#999" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </Animated.View>
+        <SearchBar
+          value={searchQuery}
+          onChangeText={handleSearch}
+          placeholder="Tìm kiếm sự kiện..."
+          autoFocus
+          onClear={() => setSearchQuery("")}
+        />
       )}
 
+      {/* Main Content */}
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#007AFF"]} tintColor="#007AFF" />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={["#5C6BC0"]} tintColor="#5C6BC0" />
         }
       >
         {/* Profile Section */}
-        <Animated.View
-          style={[
-            styles.profileContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY }],
-            },
-          ]}
-        >
-          <View style={styles.profileHeader}>
-            <View style={styles.profileInfo}>
-              <Text style={styles.welcomeText}>Xin chào,</Text>
-              <Text style={styles.profileName}>{userProfile?.displayName || "Sinh viên"}</Text>
-              <Text style={styles.profileDetail}>{userProfile?.studentId || "Chưa cập nhật"}</Text>
-              <Text style={styles.profileDetail}>{userProfile?.faculty || "Chưa cập nhật"}</Text>
-            </View>
-            <View style={styles.profileImageContainer}>
-              {userProfile?.photoURL ? (
-                <Image source={{ uri: userProfile.photoURL }} style={styles.profileImage} resizeMode="cover" />
-              ) : (
-                <View style={[styles.profileImage, styles.profileImagePlaceholder]}>
-                  <Ionicons name="person" size={40} color="#007AFF" />
-                </View>
-              )}
-            </View>
-          </View>
-        </Animated.View>
-
-        {/* Statistics Section */}
-        <View style={styles.statsContainer}>
-          <StatCard
-            value={statistics.participatedCount}
-            label="Hoạt động tham gia"
-            icon="star-outline"
-            color="#FF9500"
-            fadeAnim={fadeAnim}
-            translateY={translateY}
-          />
-          <StatCard
-            value={statistics.completedCount}
-            label="Hoạt động hoàn thành"
-            icon="checkmark-circle-outline"
-            color="#4CAF50"
-            fadeAnim={fadeAnim}
-            translateY={translateY}
-          />
-          <StatCard
-            value={statistics.pendingCount}
-            label="Hoạt động sắp tới"
-            icon="time-outline"
-            color="#FFC107"
-            fadeAnim={fadeAnim}
-            translateY={translateY}
-          />
-          <StatCard
-            value={statistics.totalHours}
-            label="Giờ hoạt động"
-            icon="hourglass-outline"
-            color="#9C27B0"
-            fadeAnim={fadeAnim}
-            translateY={translateY}
-          />
+        <View style={styles.profileSection}>
+          <ProfileHeader profile={profile} onEditPress={() => router.push("./StudentTaiKhoan")} />
         </View>
 
+        {/* Statistics Section
+        <View style={styles.statsContainer}>
+          <Text style={styles.statsTitle}>Thống kê hoạt động</Text>
+          <View style={styles.statsGrid}>
+            <StatCard
+              value={stats.participatedCount}
+              label="Tham gia"
+              icon="star-outline"
+              color="#3949AB"
+              previousValue={0}
+              delay={100}
+            />
+            <StatCard
+              value={stats.completedCount}
+              label="Hoàn thành"
+              icon="checkmark-circle-outline"
+              color="#43A047"
+              previousValue={0}
+              delay={200}
+            />
+            <StatCard
+              value={stats.pendingCount}
+              label="Hoạt động sắp tới"
+              icon="time-outline"
+              color="#FB8C00"
+              previousValue={0}
+              delay={300}
+            />
+            <StatCard
+              value={stats.totalHours}
+              label="Tổng giờ hoạt động"
+              icon="hourglass-outline"
+              color="#8E24AA"
+              previousValue={0}
+              delay={400}
+            />
+          </View>
+        </View> */}
+
         {/* Quick Actions Section */}
-        <Animated.View
-          style={[
-            styles.quickActionsContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY }],
-            },
-          ]}
-        >
+        <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
+            <View style={styles.sectionDivider} />
           </View>
           <View style={styles.quickActionButtons}>
-            {/* <DashboardButton
-              title="Điểm danh"
-              icon="camera-outline"
-              onPress={() => router.push("./DiemDanhHD")}
-              color="#007AFF"
-            /> */}
-            <DashboardButton
+            <NavigationButton
               title="Xem thông báo"
               icon="notifications-outline"
               onPress={() => router.push("./XemThongBao")}
-              color="#FF9500"
+              color="#FB8C00"
+              containerStyle={styles.quickActionButton}
+              delay={100}
             />
-            <DashboardButton
+            <NavigationButton
               title="Thời khóa biểu"
               icon="calendar-outline"
-              onPress={() => router.push("./ThoiKhoaBieu")}
-              color="#4CAF50"
+              onPress={() => Alert.alert("Thông báo", "Tính năng này sẽ sớm được cập nhật")}
+              color="#43A047"
+              containerStyle={styles.quickActionButton}
+              delay={200}
+            />
+            <NavigationButton
+              title="Hỏi đáp với AI"
+              icon="add-circle-outline"
+              onPress={() => router.push("./HoiDapAI")}
+              color="#3949AB"
+              containerStyle={styles.quickActionButton}
+              delay={300}
             />
           </View>
-        </Animated.View>
+        </View>
 
         {/* Upcoming Events Section */}
-        <Animated.View
-          style={[
-            styles.upcomingEventsContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY }],
-            },
-          ]}
-        >
+        <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Sự kiện sắp tới</Text>
             <TouchableOpacity onPress={() => router.push("./SuKien")} style={styles.viewMoreButton}>
               <Text style={styles.viewMoreText}>Xem tất cả</Text>
-              <Ionicons name="chevron-forward" size={16} color="#007AFF" />
+              <Ionicons name="chevron-forward" size={16} color="#3949AB" />
             </TouchableOpacity>
           </View>
+          <View style={styles.sectionDivider} />
 
           {filteredEvents.length > 0 ? (
             <FlatList
               data={filteredEvents}
-              renderItem={renderEventItem}
+              renderItem={({ item, index }) => (
+                <EventCard
+                  id={item.id}
+                  title={item.title}
+                  date={item.date}
+                  location={item.location}
+                  isParticipating={item.isParticipating}
+                  description={item.description}
+                  category={item.category}
+                  imageUrl={item.imageUrl}
+                  onPress={handleEventPress}
+                  index={index}
+                />
+              )}
               keyExtractor={(item) => item.id}
               horizontal={true}
               showsHorizontalScrollIndicator={false}
@@ -823,81 +365,85 @@ export default function StudentDashboard() {
             />
           ) : searchQuery ? (
             <View style={styles.noDataContainer}>
-              <Ionicons name="search-outline" size={48} color="#ccc" />
+              <Ionicons name="search-outline" size={48} color="#C5CAE9" />
               <Text style={styles.noDataText}>Không tìm thấy sự kiện phù hợp</Text>
             </View>
           ) : (
             <View style={styles.noDataContainer}>
-              <Ionicons name="calendar-outline" size={48} color="#ccc" />
+              <Ionicons name="calendar-outline" size={48} color="#C5CAE9" />
               <Text style={styles.noDataText}>Chưa có sự kiện sắp tới</Text>
             </View>
           )}
-        </Animated.View>
+        </View>
 
         {/* Main Navigation Section */}
-        <Animated.View
-          style={[
-            styles.mainNavigationContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY }],
-            },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>Truy cập nhanh</Text>
+        <View style={styles.navigationSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Truy cập</Text>
+            <View style={styles.sectionDivider} />
+          </View>
           <View style={styles.buttonContainer}>
-            <DashboardButton
-              title="Hoạt động đang diễn ra"
+            <NavigationButton
+              title="Đang diễn ra"
               icon="calendar-outline"
               onPress={() => router.push("./HDDangDienRa")}
-              color="#007AFF"
+              color="#3949AB"
+              delay={100}
             />
-            <DashboardButton
+            <NavigationButton
               title="Hoạt động tham gia"
               icon="list-outline"
               onPress={() => router.push("./HDThamGia")}
-              color="#FF9800"
+              color="#FB8C00"
+              delay={150}
             />
-            <DashboardButton
-              title="Thống kê hoạt động"
+            <NavigationButton
+              title="Thống kê"
               icon="bar-chart-outline"
               onPress={() => router.push("./ThongKeHD")}
-              color="#4CAF50"
+              color="#43A047"
+              delay={200}
             />
-            <DashboardButton
-              title="Thông tin cá nhân"
+            <NavigationButton
+              title="Thông tin sinh viên"
               icon="person-outline"
               onPress={() => router.push("./ThongTinSV")}
-              color="#9C27B0"
+              color="#8E24AA"
+              delay={250}
             />
-            <DashboardButton
+            <NavigationButton
               title="Lịch sử điểm danh"
               icon="time-outline"
               onPress={() => router.push("./LSDiemDanh")}
-              color="#F44336"
+              color="#E53935"
+              delay={300}
             />
-            <DashboardButton
-              title="Đăng ký hoạt động"
+            <NavigationButton
+              title="Tài liệu sinh hoạt"
               icon="add-circle-outline"
-              onPress={() => router.push("./DangKyHD")}
-              color="#2196F3"
+              onPress={() => router.push("./TaiLieuSH")}
+              color="#1E88E5"
+              delay={350}
             />
-            <DashboardButton
+            <NavigationButton
               title="Phản hồi"
               icon="chatbubble-outline"
               onPress={() => router.push("./PhanHoi")}
-              color="#795548"
+              color="#6D4C41"
+              delay={400}
             />
-            <DashboardButton
+            <NavigationButton
               title="Cài đặt"
               icon="settings-outline"
               onPress={() => router.push("./CaiDat")}
-              color="#607D8B"
+              color="#546E7A"
+              delay={450}
             />
           </View>
-        </Animated.View>
+        </View>
 
         <View style={styles.footer}>
+          <View style={styles.footerDivider} />
           <Text style={styles.footerText}>© 2025 BTV DEV Academy</Text>
           <Text style={styles.footerVersion}>Phiên bản 1.0.0</Text>
         </View>
@@ -909,53 +455,33 @@ export default function StudentDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#F5F7FF",
   },
   loadingContainer: {
     flex: 1,
+    backgroundColor: "#3949AB",
+  },
+  loadingContent: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
   },
   loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: "#666",
-  },
-  errorText: {
-    marginTop: 10,
+    marginTop: 16,
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#F44336",
-  },
-  errorSubText: {
-    marginTop: 5,
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  retryButton: {
-    marginTop: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: "#007AFF",
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
+    fontWeight: "500",
+    color: "#FFF",
   },
   skipButton: {
-    marginTop: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    marginTop: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: "#007AFF",
-    borderRadius: 8,
+    borderColor: "#FFF",
+    borderRadius: 30,
   },
   skipButtonText: {
-    color: "#007AFF",
+    color: "#FFF",
     fontWeight: "bold",
   },
   header: {
@@ -963,15 +489,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-    elevation: 2,
+    paddingVertical: 16,
+    backgroundColor: "#3949AB",
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    elevation: 4,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
   },
   headerLeftSection: {
     flexDirection: "row",
@@ -984,133 +510,45 @@ const styles = StyleSheet.create({
   headerButton: {
     padding: 8,
     marginLeft: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    borderRadius: 12,
   },
   headerText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
-    marginLeft: 8,
+    marginLeft: 10,
+    color: "#FFF",
   },
   content: {
     flex: 1,
   },
-  searchContainer: {
-    padding: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+  profileSection: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  searchInputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f0f0f0",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    height: 40,
-    fontSize: 16,
-    color: "#333",
-  },
-  profileContainer: {
-    backgroundColor: "#fff",
+  section: {
     padding: 16,
-    marginHorizontal: 16,
-    marginTop: 16,
+    marginBottom: 8,
+  },
+  navigationSection: {
+    padding: 16,
     marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  profileHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  welcomeText: {
-    fontSize: 14,
-    color: "#666",
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-    marginTop: 4,
-  },
-  profileDetail: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 2,
-  },
-  profileImageContainer: {
-    marginLeft: 16,
-  },
-  profileImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
-  profileImagePlaceholder: {
-    backgroundColor: "#f0f0f0",
-    justifyContent: "center",
-    alignItems: "center",
   },
   statsContainer: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  statsTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 16,
+  },
+  statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    padding: 16,
-  },
-  statItem: {
-    width: "48%",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    alignItems: "center",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  statIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  statLabel: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-  },
-  quickActionsContainer: {
-    backgroundColor: "#fff",
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -1123,87 +561,38 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#333",
   },
+  sectionDivider: {
+    height: 3,
+    backgroundColor: "#3949AB",
+    width: 40,
+    borderRadius: 2,
+    marginTop: 8,
+  },
   viewMoreButton: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "rgba(57, 73, 171, 0.1)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   viewMoreText: {
     fontSize: 14,
-    color: "#007AFF",
+    color: "#3949AB",
+    marginRight: 4,
+    fontWeight: "500",
   },
   quickActionButtons: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
   },
-  upcomingEventsContainer: {
-    backgroundColor: "#fff",
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+  quickActionButton: {
+    width: "31%",
+    marginBottom: 12,
   },
   eventsList: {
-    paddingVertical: 8,
-  },
-  eventItem: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
-    marginRight: 16,
-    width: 250,
-    borderLeftWidth: 4,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  eventTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 8,
-    color: "#333",
-  },
-  eventInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  eventInfo: {
-    fontSize: 14,
-    color: "#666",
-    marginLeft: 4,
-  },
-  participatingBadge: {
-    marginTop: 8,
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: "#E8F5E9",
-  },
-  participatingText: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#4CAF50",
-  },
-  mainNavigationContainer: {
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    paddingVertical: 12,
   },
   buttonContainer: {
     flexDirection: "row",
@@ -1211,42 +600,35 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 16,
   },
-  dashboardButtonContainer: {
-    width: "48%",
-    marginBottom: 16,
-  },
-  dashboardButton: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
+  noDataContainer: {
     alignItems: "center",
-    borderLeftWidth: 4,
+    justifyContent: "center",
+    padding: 32,
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    marginVertical: 8,
     elevation: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  dashboardButtonText: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: "bold",
+  noDataText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#7986CB",
     textAlign: "center",
   },
-  noDataContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  noDataText: {
-    marginTop: 8,
-    fontSize: 16,
-    color: "#999",
-  },
   footer: {
-    padding: 16,
+    padding: 24,
     alignItems: "center",
     marginBottom: Platform.OS === "ios" ? 20 : 0,
+  },
+  footerDivider: {
+    height: 1,
+    backgroundColor: "#E0E0E0",
+    width: "40%",
+    marginBottom: 16,
   },
   footerText: {
     fontSize: 14,
@@ -1257,4 +639,14 @@ const styles = StyleSheet.create({
     color: "#999",
     marginTop: 4,
   },
+  securityButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E9F0",
+  },
 })
+
+export default StudentDashboard

@@ -17,11 +17,14 @@ import {
   RefreshControl,
   Animated
 } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import { Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { getFirestore, collection, query, orderBy, getDocs, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, deleteField } from '@react-native-firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
+import { useRouter } from 'expo-router';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { Timestamp } from '@react-native-firebase/firestore'
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
@@ -29,8 +32,32 @@ const screenHeight = Dimensions.get('window').height;
 // Declare __DEV__ if it's not already defined
 const __DEV__ = process.env.NODE_ENV === 'development';
 
-const QuanLyThongBao = ({ navigation }) => {
-  const [notifications, setNotifications] = useState([]);
+type RootStackParamList = {
+  QuanLyThongBao: undefined
+  // Add other screen params as needed
+}
+
+type NotificationType = 'activity' | 'approval' | 'announcement' | 'system'
+
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  createdAt: Timestamp;
+  read: boolean;
+  type: NotificationType;
+  relatedId?: string;
+  activityId?: string;
+  isRead?: boolean;
+}
+
+interface QuanLyThongBaoProps {
+  navigation: NativeStackNavigationProp<RootStackParamList, 'QuanLyThongBao'>
+}
+
+const QuanLyThongBao: React.FC<QuanLyThongBaoProps> = ({ navigation }) => {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [filteredNotifications, setFilteredNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -38,22 +65,25 @@ const QuanLyThongBao = ({ navigation }) => {
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [activityId, setActivityId] = useState('');
-  const [notificationType, setNotificationType] = useState('general'); // 'general' hoặc 'activity'
+  const [notificationType, setNotificationType] = useState<'general' | 'activity'>('general');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredNotifications, setFilteredNotifications] = useState([]);
-  const [currentNotification, setCurrentNotification] = useState(null);
+  const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   
   // Animation values
   const fadeAnim = new Animated.Value(1);
   const translateY = new Animated.Value(0);
 
+  const router = useRouter();
+  const auth = getAuth();
+  const db = getFirestore();
+
   useFocusEffect(
     useCallback(() => {
-      console.log("QuanLyThongBao screen focused, fetching notifications...");
+      // console.log("QuanLyThongBao screen focused, fetching notifications...");
       fetchNotifications();
       return () => {
         // Cleanup khi màn hình mất focus
@@ -78,40 +108,40 @@ const QuanLyThongBao = ({ navigation }) => {
     setLoading(true);
     setError(null);
     try {
-      console.log("Fetching notifications for management...");
+      // console.log("Fetching notifications for management...");
       
-      // Lấy tất cả thông báo từ collection "notifications"
-      const notificationsRef = firestore().collection('notifications');
-      const querySnapshot = await notificationsRef.orderBy('createdAt', 'desc').get();
+      const notificationsQuery = query(
+        collection(db, 'notifications'),
+        orderBy('createdAt', 'desc')
+      );
+      const querySnapshot = await getDocs(notificationsQuery);
       
       if (querySnapshot.empty) {
-        console.log("No notifications found");
+        // console.log("No notifications found");
         setNotifications([]);
         setFilteredNotifications([]);
       } else {
-        console.log(`Found ${querySnapshot.size} notifications`);
+        // console.log(`Found ${querySnapshot.size} notifications`);
         
-        const notificationsList = querySnapshot.docs.map(doc => {
+        const notificationsList: Notification[] = querySnapshot.docs.map(doc => {
           const data = doc.data();
-          console.log("Notification data:", data);
-          
-          // Kiểm tra trạng thái đã đọc
-          const isRead = data.read === true;
+          // console.log("Notification data:", data);
           
           return {
             id: doc.id,
-            ...data,
-            isRead: isRead,
-            // Đảm bảo các trường luôn có giá trị
             title: data.title || "Không có tiêu đề",
             message: data.message || "Không có nội dung",
-            createdAt: data.createdAt || firestore.Timestamp.now()
+            createdAt: data.createdAt as Timestamp,
+            read: data.read || false,
+            type: data.type || 'announcement',
+            activityId: data.activityId,
+            isRead: data.read || false
           };
         });
         
         setNotifications(notificationsList);
         setFilteredNotifications(notificationsList);
-        console.log(`Processed ${notificationsList.length} notifications`);
+        // console.log(`Processed ${notificationsList.length} notifications`);
       }
     } catch (error) {
       console.error("Error fetching notifications:", error);
@@ -135,7 +165,7 @@ const QuanLyThongBao = ({ navigation }) => {
 
     setIsSending(true);
     try {
-      const user = auth().currentUser;
+      const user = auth.currentUser;
       if (!user) {
         Alert.alert('Lỗi', 'Bạn cần đăng nhập để gửi thông báo');
         setIsSending(false);
@@ -145,30 +175,25 @@ const QuanLyThongBao = ({ navigation }) => {
       const newNotification = {
         title: title.trim(),
         message: message.trim(),
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        read: false // Mặc định là chưa đọc
+        createdAt: serverTimestamp(),
+        read: false,
+        type: (notificationType === 'activity' ? 'activity' : 'announcement') as NotificationType,
+        activityId: notificationType === 'activity' ? activityId.trim() : undefined
       };
       
-      // Thêm activityId nếu là thông báo hoạt động
-      if (notificationType === 'activity' && activityId.trim()) {
-        newNotification.activityId = activityId.trim();
-      }
-      
-      const docRef = await firestore().collection('notifications').add(newNotification);
+      const docRef = await addDoc(collection(db, 'notifications'), newNotification);
       console.log("Notification created with ID:", docRef.id);
 
-      // Thêm thông báo mới vào state
-      const createdNotification = {
+      const createdNotification: Notification = {
         id: docRef.id,
         ...newNotification,
-        createdAt: new Date(), // Tạm thời dùng thời gian hiện tại để hiển thị
+        createdAt: Timestamp.fromDate(new Date()),
         isRead: false
       };
       
       setNotifications(prev => [createdNotification, ...prev]);
       setFilteredNotifications(prev => [createdNotification, ...prev]);
 
-      // Reset form
       setTitle('');
       setMessage('');
       setActivityId('');
@@ -195,36 +220,32 @@ const QuanLyThongBao = ({ navigation }) => {
       const updatedData = {
         title: title.trim(),
         message: message.trim(),
-        updatedAt: firestore.FieldValue.serverTimestamp()
+        updatedAt: serverTimestamp(),
+        type: (notificationType === 'activity' ? 'activity' : 'announcement') as NotificationType,
+        activityId: notificationType === 'activity' ? activityId.trim() : undefined
       };
       
-      // Xử lý activityId
-      if (notificationType === 'activity' && activityId.trim()) {
-        updatedData.activityId = activityId.trim();
-      } else if (notificationType === 'general' && currentNotification.activityId) {
-        // Nếu chuyển từ thông báo hoạt động sang thông báo chung, xóa activityId
-        await firestore().collection('notifications').doc(currentNotification.id).update({
-          activityId: firestore.FieldValue.delete()
+      if (notificationType === 'general' && currentNotification.activityId) {
+        await updateDoc(doc(db, 'notifications', currentNotification.id), {
+          activityId: deleteField()
         });
       }
       
-      await firestore().collection('notifications').doc(currentNotification.id).update(updatedData);
+      await updateDoc(doc(db, 'notifications', currentNotification.id), updatedData);
       console.log("Notification updated:", currentNotification.id);
 
-      // Cập nhật thông báo trong state
       setNotifications(prev => 
         prev.map(notification => 
           notification.id === currentNotification.id 
             ? {
                 ...notification, 
                 ...updatedData,
-                activityId: notificationType === 'activity' ? activityId.trim() : null
+                activityId: notificationType === 'activity' ? activityId.trim() : undefined
               } 
             : notification
         )
       );
 
-      // Reset form
       setTitle('');
       setMessage('');
       setActivityId('');
@@ -241,39 +262,45 @@ const QuanLyThongBao = ({ navigation }) => {
     }
   };
 
-  const handleDeleteNotification = (notification) => {
+  const deleteNotification = async (id: string, notification: Notification) => {
+    try {
+      const notificationRef = doc(db, 'notifications', id)
+      await deleteDoc(notificationRef)
+      return true
+    } catch (error) {
+      console.error('Error deleting notification:', error)
+      return false
+    }
+  }
+
+  const handleDeleteNotification = (notification: Notification) => {
     Alert.alert(
       'Xác nhận xóa',
       'Bạn có chắc chắn muốn xóa thông báo này không?',
       [
-        { text: 'Hủy', style: 'cancel' },
-        { 
-          text: 'Xóa', 
+        {
+          text: 'Hủy',
+          style: 'cancel',
+        },
+        {
+          text: 'Xóa',
           style: 'destructive',
           onPress: async () => {
-            setIsDeleting(true);
             try {
-              await firestore().collection('notifications').doc(notification.id).delete();
-              console.log("Notification deleted:", notification.id);
-              
-              // Xóa thông báo khỏi state
-              setNotifications(prev => prev.filter(item => item.id !== notification.id));
-              setFilteredNotifications(prev => prev.filter(item => item.id !== notification.id));
-              
-              Alert.alert('Thành công', 'Đã xóa thông báo thành công');
+              const success = await deleteNotification(notification.id, notification)
+              if (success) {
+                fetchNotifications() // Refresh the list after deletion
+              }
             } catch (error) {
-              console.error('Error deleting notification:', error);
-              Alert.alert('Lỗi', 'Không thể xóa thông báo. Vui lòng thử lại sau.');
-            } finally {
-              setIsDeleting(false);
+              console.error('Error in handleDeleteNotification:', error)
             }
-          }
-        }
+          },
+        },
       ]
-    );
-  };
+    )
+  }
 
-  const openEditModal = (notification) => {
+  const openEditModal = (id: string, notification: Notification) => {
     setCurrentNotification(notification);
     setTitle(notification.title || '');
     setMessage(notification.message || '');
@@ -282,86 +309,62 @@ const QuanLyThongBao = ({ navigation }) => {
     setEditModalVisible(true);
   };
 
-  const getTimeAgo = (timestamp) => {
-    if (!timestamp) return 'Không có ngày';
+  const formatTimestamp = (timestamp: Timestamp): string => {
+    const now = new Date();
+    const notificationDate = timestamp.toDate();
+    const diffInSeconds = Math.floor((now.getTime() - notificationDate.getTime()) / 1000);
     
-    try {
-      const now = new Date();
-      const notificationDate = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      const diffInSeconds = Math.floor((now - notificationDate) / 1000);
-      
-      if (diffInSeconds < 60) {
-        return 'Vừa xong';
-      } else if (diffInSeconds < 3600) {
-        const minutes = Math.floor(diffInSeconds / 60);
-        return `${minutes} phút trước`;
-      } else if (diffInSeconds < 86400) {
-        const hours = Math.floor(diffInSeconds / 3600);
-        return `${hours} giờ trước`;
-      } else if (diffInSeconds < 604800) {
-        const days = Math.floor(diffInSeconds / 86400);
-        return `${days} ngày trước`;
-      } else {
-        return notificationDate.toLocaleDateString('vi-VN');
-      }
-    } catch (error) {
-      console.error("Error formatting date:", error);
-      return 'Không xác định';
+    if (diffInSeconds < 60) {
+      return 'Vừa xong';
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes} phút trước`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours} giờ trước`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days} ngày trước`;
     }
   };
 
-  const getNotificationIcon = (notification) => {
-    // Dựa vào activityId để xác định loại thông báo
+  const getNotificationIcon = (notification: Notification): string => {
     if (notification.activityId) {
-      return 'calendar-outline';
+      return '📝';
+    } else if (notification.type === 'approval') {
+      return '✅';
+    } else if (notification.type === 'announcement') {
+      return '📢';
+    } else {
+      return '🔔';
     }
-    return 'notifications-outline';
   };
 
-  const renderNotificationItem = ({ item }) => {
-    const icon = getNotificationIcon(item);
-    
-    return (
-      <View style={styles.notificationItem}>
-        <View style={styles.notificationHeader}>
-          <Ionicons 
-            name={icon} 
-            size={screenWidth * 0.06} 
-            color={item.activityId ? "#4CAF50" : "#007AFF"} 
-          />
-          <Text style={styles.notificationTitle}>
-            {item.title}
-          </Text>
-        </View>
+  const renderNotificationItem = ({ item }: { item: Notification }) => (
+    <View style={styles.notificationItem}>
+      <View style={styles.notificationContent}>
+        <Text style={styles.notificationTitle}>{item.title}</Text>
         <Text style={styles.notificationMessage}>{item.message}</Text>
-        <View style={styles.notificationFooter}>
-          <Text style={styles.notificationDate}>
-            {getTimeAgo(item.createdAt)}
-          </Text>
-          <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.editButton]}
-              onPress={() => openEditModal(item)}
-            >
-              <Ionicons name="create-outline" size={screenWidth * 0.05} color="#2196F3" />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.deleteButton]}
-              onPress={() => handleDeleteNotification(item)}
-              disabled={isDeleting}
-            >
-              <Ionicons name="trash-outline" size={screenWidth * 0.05} color="#F44336" />
-            </TouchableOpacity>
-          </View>
-        </View>
-        {item.activityId && (
-          <View style={styles.activityIdContainer}>
-            <Text style={styles.activityIdText}>ID hoạt động: {item.activityId}</Text>
-          </View>
-        )}
+        <Text style={styles.notificationTime}>
+          {formatTimestamp(item.createdAt)}
+        </Text>
       </View>
-    );
-  };
+      <View style={styles.notificationActions}>
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() => openEditModal(item.id, item)}
+        >
+          <Text style={styles.buttonText}>Sửa</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDeleteNotification(item)}
+        >
+          <Text style={styles.buttonText}>Xóa</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   const renderDebugInfo = () => {
     if (__DEV__) {
@@ -387,7 +390,7 @@ const QuanLyThongBao = ({ navigation }) => {
         <View style={styles.container}>
           <View style={styles.header}>
             <TouchableOpacity 
-              onPress={() => navigation.goBack()} 
+              onPress={() => router.back()} 
               style={styles.backButton}
             >
               <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
@@ -432,7 +435,7 @@ const QuanLyThongBao = ({ navigation }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity 
-            onPress={() => navigation.goBack()} 
+            onPress={() => router.back()} 
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
@@ -819,17 +822,14 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  notificationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: screenHeight * 0.01,
+  notificationContent: {
+    flexDirection: 'column',
   },
   notificationTitle: {
     fontSize: screenWidth * 0.045,
     fontWeight: '600',
     color: '#333333',
-    marginLeft: screenWidth * 0.03,
-    flex: 1,
+    marginBottom: screenHeight * 0.01,
   },
   notificationMessage: {
     fontSize: screenWidth * 0.04,
@@ -837,11 +837,14 @@ const styles = StyleSheet.create({
     marginBottom: screenHeight * 0.01,
     lineHeight: screenWidth * 0.055,
   },
-  notificationFooter: {
+  notificationTime: {
+    fontSize: screenWidth * 0.035,
+    color: '#999999',
+  },
+  notificationActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-    marginTop: screenHeight * 0.01,
   },
   notificationDate: {
     fontSize: screenWidth * 0.035,
@@ -1022,6 +1025,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'red',
     fontWeight: 'bold',
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 

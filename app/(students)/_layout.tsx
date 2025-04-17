@@ -12,7 +12,7 @@ const TAB_CONFIG = {
   diemdanh: {
     name: "DiemDanhHD",
     title: "Điểm Danh",
-    iconName: "plus-circle",
+    iconName: "check-square",
   },
   account: {
     name: "StudentTaiKhoan",

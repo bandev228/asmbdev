@@ -2,22 +2,47 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, FlatList, TextInput, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import firestore from '@react-native-firebase/firestore';
+import { getFirestore, collection, query, where, getDocs, Timestamp } from '@react-native-firebase/firestore';
 import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Dimensions } from 'react-native';
+import { useRouter } from 'expo-router';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
 
-const BaoCaoHoatDong = ({ }) => {
-  const [activities, setActivities] = useState([]);
+interface Activity {
+  id: string;
+  name: string;
+  createdAt: Timestamp;
+  status: 'pending' | 'approved' | 'completed' | 'cancelled';
+  participants?: string[];
+  location?: string;
+  startDate?: Timestamp;
+  endDate?: Timestamp;
+  attendanceTime?: {
+    [key: string]: Timestamp;
+  };
+}
+
+interface User {
+  studentId?: string;
+  fullname?: string;
+  email?: string;
+  className?: string;
+  phoneNumber?: string;
+}
+
+const BaoCaoHoatDong = () => {
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [filterType, setFilterType] = useState('all'); // all, created, completed
+  const [filterType, setFilterType] = useState<'all' | 'created' | 'completed'>('all');
+  const router = useRouter();
+  const db = getFirestore();
 
   useEffect(() => {
     fetchActivities();
@@ -26,7 +51,7 @@ const BaoCaoHoatDong = ({ }) => {
   const fetchActivities = async () => {
     setLoading(true);
     try {
-      let query = firestore().collection('activities');
+      let q = query(collection(db, 'activities'));
 
       // Lọc theo ngày
       const startOfDay = new Date(selectedDate);
@@ -37,31 +62,35 @@ const BaoCaoHoatDong = ({ }) => {
       // Tách query thành 2 phần để tránh lỗi index
       if (filterType === 'completed') {
         // Lấy tất cả hoạt động trong ngày trước
-        const snapshot = await query
-          .where('createdAt', '>=', startOfDay)
-          .where('createdAt', '<=', endOfDay)
-          .get();
+        const snapshot = await getDocs(
+          query(q, 
+            where('createdAt', '>=', startOfDay),
+            where('createdAt', '<=', endOfDay)
+          )
+        );
 
         // Lọc status ở client side
         const activitiesList = snapshot.docs
           .map(doc => ({
             id: doc.id,
             ...doc.data()
-          }))
+          } as Activity))
           .filter(activity => activity.status === 'completed');
 
         setActivities(activitiesList);
       } else {
         // Trường hợp 'all' hoặc 'created', chỉ lọc theo ngày
-        const snapshot = await query
-          .where('createdAt', '>=', startOfDay)
-          .where('createdAt', '<=', endOfDay)
-          .get();
+        const snapshot = await getDocs(
+          query(q,
+            where('createdAt', '>=', startOfDay),
+            where('createdAt', '<=', endOfDay)
+          )
+        );
 
         const activitiesList = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        }));
+        } as Activity));
 
         setActivities(activitiesList);
       }
@@ -80,9 +109,9 @@ const BaoCaoHoatDong = ({ }) => {
         'Ngày tạo': activity.createdAt.toDate().toLocaleDateString(),
         'Trạng thái': activity.status,
         'Số người tham gia': activity.participants?.length || 0,
-        'Địa điểm': activity.location,
-        'Thời gian bắt đầu': activity.startDate?.toDate().toLocaleDateString(),
-        'Thời gian kết thúc': activity.endDate?.toDate().toLocaleDateString(),
+        'Địa điểm': activity.location || 'Chưa cập nhật',
+        'Thời gian bắt đầu': activity.startDate?.toDate().toLocaleDateString() || 'Chưa cập nhật',
+        'Thời gian kết thúc': activity.endDate?.toDate().toLocaleDateString() || 'Chưa cập nhật',
       }));
 
       const ws = XLSX.utils.json_to_sheet(data);
@@ -106,7 +135,7 @@ const BaoCaoHoatDong = ({ }) => {
     }
   };
 
-  const exportParticipantsList = async (activity) => {
+  const exportParticipantsList = async (activity: Activity) => {
     try {
       // Lấy danh sách user IDs từ activity.participants
       const participantIds = activity.participants || [];
@@ -114,18 +143,17 @@ const BaoCaoHoatDong = ({ }) => {
       // Fetch thông tin chi tiết của từng sinh viên
       const participantsData = await Promise.all(
         participantIds.map(async (userId) => {
-          const userDoc = await firestore()
-            .collection('users')
-            .doc(userId)
-            .get();
+          const userDoc = await getDocs(
+            query(collection(db, 'users'), where('uid', '==', userId))
+          );
           
-          const userData = userDoc.data();
+          const userData = userDoc.docs[0]?.data() as User;
           return {
-            'MSSV': userData.studentId || 'N/A',
-            'Họ và tên': userData.fullname || 'N/A',
-            'Email': userData.email || 'N/A',
-            'Lớp': userData.className || 'N/A',
-            'Số điện thoại': userData.phoneNumber || 'N/A',
+            'MSSV': userData?.studentId || 'N/A',
+            'Họ và tên': userData?.fullname || 'N/A',
+            'Email': userData?.email || 'N/A',
+            'Lớp': userData?.className || 'N/A',
+            'Số điện thoại': userData?.phoneNumber || 'N/A',
             'Thời gian điểm danh': activity.attendanceTime?.[userId]?.toDate().toLocaleString() || 'Chưa điểm danh'
           };
         })
@@ -154,7 +182,7 @@ const BaoCaoHoatDong = ({ }) => {
     }
   };
 
-  const renderActivityItem = ({ item }) => (
+  const renderActivityItem = ({ item }: { item: Activity }) => (
     <View style={styles.activityItem}>
       <Text style={styles.activityName}>{item.name}</Text>
       <Text style={styles.activityInfo}>
@@ -183,7 +211,7 @@ const BaoCaoHoatDong = ({ }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity 
-            onPress={() => navigation.goBack()} 
+            onPress={() => router.back()} 
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
