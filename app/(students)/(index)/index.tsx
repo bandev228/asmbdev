@@ -439,6 +439,20 @@ const StudentDashboard = () => {
               color="#546E7A"
               delay={450}
             />
+            <NavigationButton
+              title="Bạn bè"
+              icon="people-outline"
+              onPress={() => router.push("./FriendsListScreen")}
+              color="#FF9800"
+              delay={500}
+            />
+            {/* <NavigationButton
+              title="Chat"
+              icon="chatbubble-outline"
+              onPress={() => router.push("./ChatScreen")}
+              color="#6D4C41"
+              delay={550}
+            /> */}
           </View>
         </View>
 

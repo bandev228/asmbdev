@@ -99,6 +99,20 @@ export default function IndexLayout() {
           presentation: "card",
         }}
       />
+      <Stack.Screen
+        name="FriendsListScreen"
+        options={{
+          headerShown: false,
+          presentation: "card",
+        }}
+      />
+      {/* <Stack.Screen
+        name="ChatScreen"
+        options={{
+          headerShown: false,
+          presentation: "card",
+        }}
+      /> */}
       {/* <Stack.Screen
         name="StudentTaiKhoan"
         options={{
