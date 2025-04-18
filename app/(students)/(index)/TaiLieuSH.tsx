@@ -15,6 +15,7 @@ import {
   Modal,
   Share,
   Platform,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,6 +55,23 @@ const TaiLieuSinhHoat = () => {
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [showOptions, setShowOptions] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const scaleAnim = React.useRef(new Animated.Value(0.95)).current;
+
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   const getDataFromCache = async () => {
     try {
@@ -376,42 +394,53 @@ const TaiLieuSinhHoat = () => {
     });
   };
 
-  const renderDocumentItem = ({ item }: { item: Document }) => (
-    <TouchableOpacity
-      style={styles.documentItem}
-      onPress={() => openDocument(item)}
+  const renderDocumentItem = ({ item, index }: { item: Document; index: number }) => (
+    <Animated.View
+      style={[
+        styles.documentItem,
+        {
+          opacity: fadeAnim,
+          transform: [{ scale: scaleAnim }],
+        },
+      ]}
     >
-      <View style={styles.documentIcon}>
-        <Ionicons
-          name={getFileIcon(item.fileType)}
-          size={24}
-          color="#007AFF"
-        />
-      </View>
-      <View style={styles.documentInfo}>
-        <Text style={styles.documentTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={styles.documentDescription} numberOfLines={2}>
-          {item.description}
-        </Text>
-        <View style={styles.documentMeta}>
-          <View style={styles.metaRow}>
-            <Ionicons name="person-outline" size={14} color="#666" />
-            <Text style={styles.metaText}>{item.senderName}</Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Ionicons name="calendar-outline" size={14} color="#666" />
-            <Text style={styles.metaText}>{formatDate(item.uploadedAt)}</Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Ionicons name="document-outline" size={14} color="#666" />
-            <Text style={styles.metaText}>{formatFileSize(item.fileSize)}</Text>
+      <TouchableOpacity
+        style={styles.documentContent}
+        onPress={() => openDocument(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.documentIconContainer}>
+          <Ionicons
+            name={getFileIcon(item.fileType)}
+            size={28}
+            color="#007AFF"
+          />
+        </View>
+        <View style={styles.documentInfo}>
+          <Text style={styles.documentTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.documentDescription} numberOfLines={2}>
+            {item.description}
+          </Text>
+          <View style={styles.documentMeta}>
+            <View style={styles.metaRow}>
+              <Ionicons name="person-outline" size={14} color="#666" />
+              <Text style={styles.metaText}>{item.senderName}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Ionicons name="calendar-outline" size={14} color="#666" />
+              <Text style={styles.metaText}>{formatDate(item.uploadedAt)}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Ionicons name="document-outline" size={14} color="#666" />
+              <Text style={styles.metaText}>{formatFileSize(item.fileSize)}</Text>
+            </View>
           </View>
         </View>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
-    </TouchableOpacity>
+        <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
+      </TouchableOpacity>
+    </Animated.View>
   );
 
   if (loading) {
@@ -421,13 +450,14 @@ const TaiLieuSinhHoat = () => {
         <View style={styles.container}>
           <View style={styles.header}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
+              <Ionicons name="arrow-back" size={24} color="#007AFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Tài liệu sinh hoạt</Text>
             <View style={styles.headerRight} />
           </View>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingText}>Đang tải tài liệu...</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -441,17 +471,19 @@ const TaiLieuSinhHoat = () => {
         <View style={styles.container}>
           <View style={styles.header}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
+              <Ionicons name="arrow-back" size={24} color="#007AFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Tài liệu sinh hoạt</Text>
             <View style={styles.headerRight} />
           </View>
           <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={48} color="#FF3B30" />
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity
               style={styles.retryButton}
               onPress={fetchDocuments}
             >
+              <Ionicons name="refresh" size={20} color="#FFFFFF" />
               <Text style={styles.retryButtonText}>Thử lại</Text>
             </TouchableOpacity>
           </View>
@@ -545,41 +577,53 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F5',
+    backgroundColor: '#F5F7FA',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: screenWidth * 0.04,
-    paddingVertical: screenWidth * 0.03,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: '#E5E9F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   backButton: {
-    padding: screenWidth * 0.02,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F4F8',
   },
   headerTitle: {
-    fontSize: screenWidth * 0.055,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333333',
-    flex: 1,
-    textAlign: 'center',
+    color: '#1A2138',
   },
   headerRight: {
-    width: screenWidth * 0.1,
+    width: 40,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 8,
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+    gap: 16,
   },
   errorText: {
     color: '#FF3B30',
@@ -588,10 +632,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#007AFF',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
+    gap: 8,
   },
   retryButtonText: {
     color: '#FFFFFF',
@@ -602,42 +649,43 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   documentItem: {
+    marginBottom: 16,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  documentContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: screenWidth * 0.04,
-    marginBottom: screenWidth * 0.03,
-    padding: screenWidth * 0.04,
-    borderRadius: screenWidth * 0.03,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    padding: 16,
   },
-  documentIcon: {
-    width: screenWidth * 0.12,
-    height: screenWidth * 0.12,
-    borderRadius: screenWidth * 0.02,
-    backgroundColor: '#F0F0F5',
+  documentIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F0F4F8',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: screenWidth * 0.03,
+    marginRight: 16,
   },
   documentInfo: {
     flex: 1,
-    marginRight: screenWidth * 0.02,
+    marginRight: 16,
   },
   documentTitle: {
-    fontSize: screenWidth * 0.042,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
-    marginBottom: screenWidth * 0.01,
+    color: '#1A2138',
+    marginBottom: 4,
   },
   documentDescription: {
-    fontSize: screenWidth * 0.035,
-    color: '#666666',
-    marginBottom: screenWidth * 0.02,
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
   },
   documentMeta: {
     flexDirection: 'column',
@@ -649,8 +697,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   metaText: {
-    fontSize: screenWidth * 0.032,
-    color: '#666666',
+    fontSize: 12,
+    color: '#666',
   },
   modalOverlay: {
     flex: 1,
@@ -664,6 +712,11 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 400,
     padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -672,14 +725,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: {
-    fontSize: screenWidth * 0.055,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
+    color: '#1A2138',
     flex: 1,
     marginRight: 16,
   },
   closeButton: {
-    padding: 4,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F4F8',
   },
   optionsContainer: {
     gap: 12,
@@ -688,13 +743,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#F0F0F5',
+    borderRadius: 12,
+    backgroundColor: '#F0F4F8',
+  },
+  optionIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   optionText: {
-    fontSize: screenWidth * 0.042,
-    color: '#333333',
-    marginLeft: 12,
+    fontSize: 16,
+    color: '#1A2138',
   },
 });
 

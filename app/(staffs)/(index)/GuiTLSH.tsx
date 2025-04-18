@@ -10,6 +10,8 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  Image,
+  Animated,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
@@ -17,7 +19,7 @@ import * as DocumentPicker from 'expo-document-picker'
 import { getFirestore, collection, addDoc, serverTimestamp } from '@react-native-firebase/firestore'
 import { getAuth } from '@react-native-firebase/auth'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import * as FileSystem from 'expo-file-system'
+import { getStorage, ref, putFile, getDownloadURL } from '@react-native-firebase/storage'
 
 interface Document {
   title: string
@@ -37,6 +39,15 @@ const GuiTLSH = () => {
   const [selectedFile, setSelectedFile] = useState<DocumentPicker.DocumentPickerResult | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fadeAnim = React.useRef(new Animated.Value(0)).current
+
+  React.useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start()
+  }, [])
 
   const pickDocument = async () => {
     try {
@@ -77,9 +88,12 @@ const GuiTLSH = () => {
       }
 
       const fileUri = selectedFile.assets[0].uri
-      const base64 = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      })
+      const storage = getStorage()
+      const storageRef = ref(storage, `documents/${Date.now()}_${selectedFile.assets[0].name}`)
+      
+      // Upload file to Firebase Storage
+      await putFile(storageRef, fileUri)
+      const downloadURL = await getDownloadURL(storageRef)
 
       const db = getFirestore()
       const documentsRef = collection(db, 'documents')
@@ -87,7 +101,7 @@ const GuiTLSH = () => {
       const documentData: Document = {
         title: title.trim(),
         description: description.trim(),
-        fileUrl: `data:${selectedFile.assets[0].mimeType};base64,${base64}`,
+        fileUrl: downloadURL,
         fileType: selectedFile.assets[0].mimeType || '',
         fileName: selectedFile.assets[0].name,
         fileSize: selectedFile.assets[0].size || 0,
@@ -113,20 +127,20 @@ const GuiTLSH = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+      <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Gửi tài liệu</Text>
         <View style={styles.headerRight} />
-      </View>
+      </Animated.View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.content}
       >
         <ScrollView style={styles.scrollView}>
-          <View style={styles.formContainer}>
+          <Animated.View style={[styles.formContainer, { opacity: fadeAnim }]}>
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Tiêu đề tài liệu</Text>
               <TextInput
@@ -134,6 +148,7 @@ const GuiTLSH = () => {
                 placeholder="Nhập tiêu đề tài liệu"
                 value={title}
                 onChangeText={setTitle}
+                placeholderTextColor="#999"
               />
             </View>
 
@@ -147,6 +162,7 @@ const GuiTLSH = () => {
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
+                placeholderTextColor="#999"
               />
             </View>
 
@@ -163,13 +179,23 @@ const GuiTLSH = () => {
                 </Text>
               </TouchableOpacity>
               {selectedFile?.assets?.[0] && (
-                <Text style={styles.fileInfo}>
-                  Loại: {selectedFile.assets[0].mimeType} | Kích thước: {(selectedFile.assets[0].size || 0) / 1024} KB
-                </Text>
+                <View style={styles.fileInfoContainer}>
+                  <Text style={styles.fileInfo}>
+                    Loại: {selectedFile.assets[0].mimeType}
+                  </Text>
+                  <Text style={styles.fileInfo}>
+                    Kích thước: {(selectedFile.assets[0].size || 0) / 1024} KB
+                  </Text>
+                </View>
               )}
             </View>
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+            {error && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={20} color="#FF3B30" />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
 
             <TouchableOpacity
               style={[styles.uploadButton, isUploading && styles.uploadButtonDisabled]}
@@ -185,7 +211,7 @@ const GuiTLSH = () => {
                 </>
               )}
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -195,7 +221,7 @@ const GuiTLSH = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F5',
+    backgroundColor: '#F5F7FA',
   },
   header: {
     flexDirection: 'row',
@@ -205,15 +231,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: '#E5E9F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F4F8',
   },
   title: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#1A2138',
   },
   headerRight: {
     width: 40,
@@ -225,64 +258,85 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   formContainer: {
-    padding: 16,
+    padding: 20,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
+    color: '#1A2138',
     marginBottom: 8,
   },
   input: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 15,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E5E9F0',
+    color: '#1A2138',
   },
   textArea: {
-    height: 100,
+    height: 120,
     textAlignVertical: 'top',
   },
   fileContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   fileButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 15,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E5E9F0',
   },
   fileButtonText: {
-    marginLeft: 8,
+    marginLeft: 12,
     fontSize: 16,
-    color: '#333333',
+    color: '#1A2138',
+    flex: 1,
+  },
+  fileInfoContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#F0F4F8',
+    borderRadius: 8,
   },
   fileInfo: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#666666',
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF5F5',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
   },
   errorText: {
     color: '#FF3B30',
     fontSize: 14,
-    marginBottom: 16,
+    marginLeft: 8,
   },
   uploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#007AFF',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
-    marginTop: 16,
+    marginTop: 20,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   uploadButtonDisabled: {
     opacity: 0.7,

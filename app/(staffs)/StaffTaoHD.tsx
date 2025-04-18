@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react"
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Animated, Image,
-} from "react-native"
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Animated, Image, Modal, Pressable } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { getFirestore, collection, addDoc, Timestamp, serverTimestamp } from "@react-native-firebase/firestore"
 import { getAuth } from "@react-native-firebase/auth"
@@ -10,6 +9,8 @@ import * as Location from "expo-location"
 import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
 import { useRouter } from "expo-router"
+import { getStorage, ref, putFile, getDownloadURL } from "@react-native-firebase/storage"
+import * as DocumentPicker from 'expo-document-picker'
 
 interface FormErrors {
   activityName?: string;
@@ -17,6 +18,8 @@ interface FormErrors {
   participantLimit?: string;
   date?: string;
   time?: string;
+  activityType?: string;
+  planFile?: string;
 }
 
 interface Coordinates {
@@ -38,7 +41,19 @@ interface Activity {
   location: string;
   duration: number;
   coordinates: Coordinates | null;
+  activityType: string;
+  planFileUrl?: string;
+  bannerImageUrl?: string;
 }
+
+const activityTypes = [
+  { id: 'volunteer', name: 'Tình nguyện' },
+  { id: 'union', name: 'Đoàn Hội' },
+  { id: 'club', name: 'CLB' },
+  { id: 'academic', name: 'Học thuật' },
+  { id: 'softskill', name: 'Kỹ năng mềm' },
+  { id: 'other', name: 'Khác' },
+];
 
 const TaoHD = () => {
   const router = useRouter()
@@ -59,14 +74,17 @@ const TaoHD = () => {
   const [locationError, setLocationError] = useState("")
   const [formErrors, setFormErrors] = useState<FormErrors>({})
   const [currentCoordinates, setCurrentCoordinates] = useState<Coordinates | null>(null)
+  const [activityType, setActivityType] = useState("")
+  const [showTypePicker, setShowTypePicker] = useState(false)
+  const [planFile, setPlanFile] = useState<DocumentPicker.DocumentPickerResult | null>(null)
+  const [bannerImage, setBannerImage] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current
   const auth = getAuth()
   const db = getFirestore()
-  const [bannerImage, setBannerImage] = useState<string | null>(null)
-  const [isUploadingBanner, setIsUploadingBanner] = useState(false)
+  const storage = getStorage()
 
   useEffect(() => {
-    // Start entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -76,30 +94,53 @@ const TaoHD = () => {
     ]).start()
   }, [])
 
-  const getCurrentLocation = async () => {
+  const uploadFile = async (uri: string, path: string) => {
     try {
-      setIsLoading(true)
-      const { status } = await Location.requestForegroundPermissionsAsync()
+      const storageRef = ref(storage, path);
+      await putFile(storageRef, uri);
+      return await getDownloadURL(storageRef);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      throw error;
+    }
+  };
 
-      if (status !== "granted") {
-        setLocationError("Quyền truy cập vị trí bị từ chối")
-        setIsLoading(false)
+  const pickPlanFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      });
+      
+      if (result.canceled === false) {
+        setPlanFile(result);
+      }
+    } catch (error) {
+      console.error('Error picking file:', error);
+      Alert.alert('Lỗi', 'Không thể chọn file. Vui lòng thử lại.');
+    }
+  };
+
+  const pickBannerImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+      if (status !== 'granted') {
+        Alert.alert('Cần quyền truy cập', 'Vui lòng cấp quyền truy cập thư viện ảnh để tải lên banner')
         return
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
       })
 
-      const { latitude, longitude } = location.coords
-      setCurrentCoordinates({ latitude, longitude })
-      setLocation(`Vị trí hiện tại (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`)
-      setIsLoading(false)
-      Alert.alert("Thành công", "Đã lưu tọa độ hiện tại cho hoạt động này", [{ text: "OK" }])
+      if (!result.canceled) {
+        setBannerImage(result.assets[0].uri)
+      }
     } catch (error) {
-      console.error("Error getting current location:", error)
-      setLocationError("Không thể lấy vị trí hiện tại")
-      setIsLoading(false)
+      console.error('Error picking image:', error)
+      Alert.alert('Lỗi', 'Không thể chọn ảnh. Vui lòng thử lại.')
     }
   }
 
@@ -108,6 +149,10 @@ const TaoHD = () => {
 
     if (!activityName.trim()) {
       errors.activityName = "Vui lòng nhập tên hoạt động"
+    }
+
+    if (!activityType) {
+      errors.activityType = "Vui lòng chọn loại hoạt động"
     }
 
     if (!location.trim()) {
@@ -132,63 +177,6 @@ const TaoHD = () => {
     return Object.keys(errors).length === 0
   }
 
-  const pickBannerImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
-      if (status !== 'granted') {
-        Alert.alert('Cần quyền truy cập', 'Vui lòng cấp quyền truy cập thư viện ảnh để tải lên banner')
-        return
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.1,
-      })
-
-      if (!result.canceled) {
-        setBannerImage(result.assets[0].uri)
-      }
-    } catch (error) {
-      console.error('Error picking image:', error)
-      Alert.alert('Lỗi', 'Không thể chọn ảnh. Vui lòng thử lại.')
-    }
-  }
-
-  const uploadBannerImage = async (uri: string) => {
-    try {
-      setIsUploadingBanner(true)
-      
-      // Đọc file dưới dạng base64
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      })
-      
-      // Tạo metadata cho ảnh
-      const metadata = {
-        contentType: 'image/jpeg',
-        uploadedBy: auth.currentUser?.uid || 'unknown',
-        uploadedAt: new Date().toISOString()
-      }
-      
-      // Lưu ảnh vào Firestore
-      const imageDoc = await addDoc(collection(db, 'activity_images'), {
-        imageData: base64,
-        metadata: metadata,
-        createdAt: serverTimestamp()
-      })
-      
-      return imageDoc.id
-    } catch (error) {
-      console.error('Error uploading banner:', error)
-      Alert.alert('Lỗi', 'Không thể tải lên banner. Vui lòng thử lại.')
-      throw error
-    } finally {
-      setIsUploadingBanner(false)
-    }
-  }
-
   const handleCreateActivity = async () => {
     if (!validateForm()) {
       Alert.alert("Lỗi", "Vui lòng kiểm tra lại thông tin hoạt động")
@@ -204,15 +192,30 @@ const TaoHD = () => {
         return
       }
 
-      let bannerImageId = null
+      let bannerImageUrl = null;
+      let planFileUrl = null;
+
+      // Upload banner image
       if (bannerImage) {
         try {
-          bannerImageId = await uploadBannerImage(bannerImage)
+          bannerImageUrl = await uploadFile(bannerImage, `activities/${Date.now()}_banner.jpg`);
         } catch (error) {
-          console.error('Error uploading banner:', error)
-          Alert.alert('Lỗi', 'Không thể tải lên banner. Vui lòng thử lại.')
-          setIsLoading(false)
-          return
+          console.error('Error uploading banner:', error);
+          Alert.alert('Lỗi', 'Không thể tải lên banner. Vui lòng thử lại.');
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Upload plan file
+      if (planFile?.canceled === false) {
+        try {
+          planFileUrl = await uploadFile(planFile.assets[0].uri, `activities/${Date.now()}_plan.${planFile.assets[0].name.split('.').pop()}`);
+        } catch (error) {
+          console.error('Error uploading plan file:', error);
+          Alert.alert('Lỗi', 'Không thể tải lên file kế hoạch. Vui lòng thử lại.');
+          setIsLoading(false);
+          return;
         }
       }
 
@@ -237,7 +240,9 @@ const TaoHD = () => {
         location: location,
         duration: durationHours,
         coordinates: currentCoordinates,
-        bannerImageId: bannerImageId,
+        activityType,
+        planFileUrl,
+        bannerImageUrl,
       }
 
       const docRef = await addDoc(collection(db, "activities"), newActivity)
@@ -273,6 +278,33 @@ const TaoHD = () => {
     }
   }
 
+  const getCurrentLocation = async () => {
+    try {
+      setIsLoading(true)
+      const { status } = await Location.requestForegroundPermissionsAsync()
+
+      if (status !== "granted") {
+        setLocationError("Quyền truy cập vị trí bị từ chối")
+        setIsLoading(false)
+        return
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      })
+
+      const { latitude, longitude } = location.coords
+      setCurrentCoordinates({ latitude, longitude })
+      setLocation(`Vị trí hiện tại (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`)
+      setIsLoading(false)
+      Alert.alert("Thành công", "Đã lưu tọa độ hiện tại cho hoạt động này", [{ text: "OK" }])
+    } catch (error) {
+      console.error("Error getting current location:", error)
+      setLocationError("Không thể lấy vị trí hiện tại")
+      setIsLoading(false)
+    }
+  }
+
   const onChangeDate = (
     event: any,
     selectedDate: Date | undefined,
@@ -280,8 +312,11 @@ const TaoHD = () => {
     type: string
   ) => {
     if (Platform.OS === "android") {
-      setShowStartPicker(false)
-      setShowEndPicker(false)
+      if (type === 'start') {
+        setShowStartPicker(false)
+      } else {
+        setShowEndPicker(false)
+      }
     }
 
     if (selectedDate) {
@@ -296,8 +331,11 @@ const TaoHD = () => {
     type: string
   ) => {
     if (Platform.OS === "android") {
-      setShowStartTimePicker(false)
-      setShowEndTimePicker(false)
+      if (type === 'start') {
+        setShowStartTimePicker(false)
+      } else {
+        setShowEndTimePicker(false)
+      }
     }
 
     if (selectedTime) {
@@ -346,9 +384,9 @@ const TaoHD = () => {
             <TouchableOpacity
               style={styles.bannerButton}
               onPress={pickBannerImage}
-              disabled={isUploadingBanner}
+              disabled={isLoading}
             >
-              {isUploadingBanner ? (
+              {isLoading ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
                 <Ionicons name="camera-outline" size={24} color="#FFFFFF" />
@@ -370,6 +408,22 @@ const TaoHD = () => {
               }}
             />
             {formErrors.activityName ? <Text style={styles.errorText}>{formErrors.activityName}</Text> : null}
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>
+              Loại hoạt động <Text style={styles.required}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={[styles.input, styles.pickerInput, formErrors.activityType ? styles.inputError : null]}
+              onPress={() => setShowTypePicker(true)}
+            >
+              <Text style={[styles.pickerText, !activityType && { color: '#999' }]}>
+                {activityType ? activityTypes.find(type => type.id === activityType)?.name : 'Chọn loại hoạt động'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#007AFF" />
+            </TouchableOpacity>
+            {formErrors.activityType ? <Text style={styles.errorText}>{formErrors.activityType}</Text> : null}
           </View>
 
           <View style={styles.rowContainer}>
@@ -452,10 +506,6 @@ const TaoHD = () => {
             </View>
           </View>
 
-          {formErrors.date || formErrors.time ? (
-            <Text style={styles.errorText}>{formErrors.date || formErrors.time}</Text>
-          ) : null}
-
           {showEndPicker && (
             <DateTimePicker
               value={endDate}
@@ -475,6 +525,10 @@ const TaoHD = () => {
               onChange={(event, selectedTime) => onChangeTime(event, selectedTime, setEndTime, "end")}
             />
           )}
+
+          {formErrors.date || formErrors.time ? (
+            <Text style={styles.errorText}>{formErrors.date || formErrors.time}</Text>
+          ) : null}
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>
@@ -511,8 +565,7 @@ const TaoHD = () => {
                 <Ionicons name="locate" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
-            {formErrors.location ?
-            <Text style={styles.errorText}>{formErrors.location}</Text> : null}
+            {formErrors.location ? <Text style={styles.errorText}>{formErrors.location}</Text> : null}
             {locationError ? <Text style={styles.errorText}>{locationError}</Text> : null}
             {currentCoordinates && (
               <View style={styles.coordinatesContainer}>
@@ -525,10 +578,23 @@ const TaoHD = () => {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Ghi chú</Text>
+            <Text style={styles.label}>File kế hoạch tổ chức</Text>
+            <TouchableOpacity
+              style={[styles.input, styles.fileInput]}
+              onPress={pickPlanFile}
+            >
+              <Text style={[styles.fileText, !planFile && { color: '#999' }]}>
+                {planFile?.canceled === false ? planFile.assets[0].name : 'Chọn file kế hoạch (.doc, .pdf)'}
+              </Text>
+              <Ionicons name="document-attach-outline" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Mô tả</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Nhập ghi chú, mô tả chi tiết về hoạt động..."
+              placeholder="Mô tả chi tiết về hoạt động..."
               value={notes}
               onChangeText={setNotes}
               multiline
@@ -553,6 +619,47 @@ const TaoHD = () => {
           </TouchableOpacity>
         </Animated.View>
       </ScrollView>
+
+      <Modal
+        visible={showTypePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTypePicker(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Chọn loại hoạt động</Text>
+              <TouchableOpacity onPress={() => setShowTypePicker(false)}>
+                <Ionicons name="close" size={24} color="#007AFF" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {activityTypes.map((type) => (
+                <TouchableOpacity
+                  key={type.id}
+                  style={[
+                    styles.typeOption,
+                    activityType === type.id && styles.selectedTypeOption,
+                  ]}
+                  onPress={() => {
+                    setActivityType(type.id);
+                    setFormErrors({ ...formErrors, activityType: "" });
+                    setShowTypePicker(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.typeOptionText,
+                    activityType === type.id && styles.selectedTypeOptionText,
+                  ]}>
+                    {type.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {isLoading && (
         <View style={styles.loadingOverlay}>
@@ -649,19 +756,25 @@ const styles = StyleSheet.create({
     height: 120,
     textAlignVertical: "top",
   },
-  dateButton: {
+  pickerInput: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F5F7FA",
-    borderRadius: 12,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: "#E5E9F0",
   },
-  dateButtonText: {
+  pickerText: {
     fontSize: 16,
     color: "#1A2138",
+  },
+  fileInput: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  fileText: {
+    fontSize: 16,
+    color: "#1A2138",
+    flex: 1,
+    marginRight: 8,
   },
   locationInputContainer: {
     flexDirection: "row",
@@ -751,6 +864,60 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    width: '80%',
+    maxHeight: '80%',
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1A2138',
+  },
+  typeOption: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E9F0',
+  },
+  selectedTypeOption: {
+    backgroundColor: '#F0F4F8',
+  },
+  typeOptionText: {
+    fontSize: 16,
+    color: '#1A2138',
+  },
+  selectedTypeOptionText: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  dateButton: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F5F7FA",
+    borderRadius: 12,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#E5E9F0",
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: "#1A2138",
   },
 })
 
