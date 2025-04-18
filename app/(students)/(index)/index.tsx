@@ -457,7 +457,7 @@ const StudentDashboard = () => {
         </View>
 
         <View style={styles.footer}>
-          <View style={styles.footerDivider} />
+          <View style={styles.footerDivider}/>
           <Text style={styles.footerText}>© 2025 BTV DEV Academy</Text>
           <Text style={styles.footerVersion}>Phiên bản 1.0.0</Text>
         </View>

@@ -27,6 +27,7 @@ import {
   getFirestore,
   FirebaseFirestoreTypes
 } from '@react-native-firebase/firestore';
+import { getStorage, ref, getDownloadURL } from '@react-native-firebase/storage';
 import { useRouter } from 'expo-router';
 import { getApp } from '@react-native-firebase/app';
 
@@ -35,7 +36,7 @@ const { width } = Dimensions.get('window');
 interface Activity {
   id: string;
   name: string;
-  description?: string;
+  notes?: string;
   startDate: Date;
   endDate: Date;
   location?: string;
@@ -43,17 +44,7 @@ interface Activity {
   creatorName: string;
   status: string;
   participantLimit: number;
-  bannerImageId?: string;
-  bannerUrl?: string;
-}
-
-interface ActivityImage {
-  imageData: string;
-  metadata?: {
-    contentType: string;
-    uploadedBy: string;
-    uploadedAt: string;
-  };
+  bannerImageUrl?: string;
 }
 
 const QuanLyHoatDong = () => {
@@ -99,18 +90,6 @@ const QuanLyHoatDong = () => {
       const approved = await Promise.all(approvedSnapshot.docs.map(async (docSnapshot) => {
         const data = docSnapshot.data();
         const userData = usersMap.get(data.createdBy);
-        let bannerUrl = undefined;
-
-        if (data.bannerImageId) {
-          const imageRef = doc(db, 'activity_images', data.bannerImageId);
-          const imageDoc = await getDoc(imageRef);
-          if (imageDoc.exists) {
-            const imageData = imageDoc.data() as ActivityImage;
-            if (imageData?.imageData) {
-              bannerUrl = `data:image/jpeg;base64,${imageData.imageData}`;
-            }
-          }
-        }
 
         return {
           id: docSnapshot.id,
@@ -118,7 +97,7 @@ const QuanLyHoatDong = () => {
           startDate: data.startDate.toDate(),
           endDate: data.endDate.toDate(),
           creatorName: userData?.displayName || 'Không xác định',
-          bannerUrl
+          bannerImageUrl: data.bannerImageUrl
         } as Activity;
       }));
 
@@ -126,18 +105,6 @@ const QuanLyHoatDong = () => {
       const pending = await Promise.all(pendingSnapshot.docs.map(async (docSnapshot) => {
         const data = docSnapshot.data();
         const userData = usersMap.get(data.createdBy);
-        let bannerUrl = undefined;
-
-        if (data.bannerImageId) {
-          const imageRef = doc(db, 'activity_images', data.bannerImageId);
-          const imageDoc = await getDoc(imageRef);
-          if (imageDoc.exists) {
-            const imageData = imageDoc.data() as ActivityImage;
-            if (imageData?.imageData) {
-              bannerUrl = `data:image/jpeg;base64,${imageData.imageData}`;
-            }
-          }
-        }
 
         return {
           id: docSnapshot.id,
@@ -145,7 +112,7 @@ const QuanLyHoatDong = () => {
           startDate: data.startDate.toDate(),
           endDate: data.endDate.toDate(),
           creatorName: userData?.displayName || 'Không xác định',
-          bannerUrl
+          bannerImageUrl: data.bannerImageUrl
         } as Activity;
       }));
 
@@ -171,7 +138,7 @@ const QuanLyHoatDong = () => {
 
   const handleEditActivity = (activity: Activity) => {
     router.push({
-      pathname: '/(staffs)/(index)/ChinhSuaHD',
+      pathname: './ChinhSuaHD',
       params: { activityId: activity.id }
     });
   };
@@ -194,9 +161,9 @@ const QuanLyHoatDong = () => {
         setModalVisible(true);
       }}
     >
-      {item.bannerUrl ? (
+      {item.bannerImageUrl ? (
         <Image 
-          source={{ uri: item.bannerUrl }} 
+          source={{ uri: item.bannerImageUrl }} 
           style={styles.banner}
           resizeMode="cover"
         />
@@ -296,9 +263,9 @@ const QuanLyHoatDong = () => {
           <View style={styles.modalContent}>
             {selectedActivity && (
               <>
-                {selectedActivity.bannerUrl && (
+                {selectedActivity.bannerImageUrl && (
                   <Image 
-                    source={{ uri: selectedActivity.bannerUrl }} 
+                    source={{ uri: selectedActivity.bannerImageUrl }} 
                     style={styles.modalBanner}
                     resizeMode="cover"
                   />
@@ -306,7 +273,7 @@ const QuanLyHoatDong = () => {
                 
                 <Text style={styles.modalTitle}>{selectedActivity.name}</Text>
                 <Text style={styles.modalDescription}>
-                  {selectedActivity.description || 'Không có mô tả'}
+                  {selectedActivity.notes || 'Không có mô tả'}
                 </Text>
 
                 <View style={styles.modalInfo}>

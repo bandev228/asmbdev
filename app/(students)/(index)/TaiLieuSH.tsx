@@ -410,17 +410,17 @@ const TaiLieuSinhHoat = () => {
         activeOpacity={0.7}
       >
         <View style={styles.documentIconContainer}>
-          <Ionicons
+        <Ionicons
             name={getFileIcon(item.fileType)}
             size={28}
-            color="#007AFF"
-          />
-        </View>
-        <View style={styles.documentInfo}>
-          <Text style={styles.documentTitle} numberOfLines={1}>
+          color="#007AFF"
+        />
+      </View>
+      <View style={styles.documentInfo}>
+        <Text style={styles.documentTitle} numberOfLines={1}>
             {item.title}
-          </Text>
-          <Text style={styles.documentDescription} numberOfLines={2}>
+        </Text>
+        <Text style={styles.documentDescription} numberOfLines={2}>
             {item.description}
           </Text>
           <View style={styles.documentMeta}>
@@ -439,7 +439,7 @@ const TaiLieuSinhHoat = () => {
           </View>
         </View>
         <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
-      </TouchableOpacity>
+    </TouchableOpacity>
     </Animated.View>
   );
 

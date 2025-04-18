@@ -1,14 +1,14 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  SafeAreaView,
-  ActivityIndicator,
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  ScrollView, 
+  SafeAreaView, 
+  ActivityIndicator, 
   Alert,
   Dimensions,
   RefreshControl,
@@ -96,7 +96,7 @@ const ManagerScreen = () => {
         onPress: async () => {
           try {
             // Clear local states and storage
-            const storageKeys = [
+                const storageKeys = [
               "fcmToken",
               "userSettings",
               "lastNotificationCheck",
@@ -113,8 +113,8 @@ const ManagerScreen = () => {
               const currentUser = auth.currentUser
               if (currentUser?.providerData?.some((provider) => provider.providerId === "google.com")) {
                 await GoogleSignin.signOut()
-              }
-            } catch (error) {
+                  }
+                } catch (error) {
               console.warn("Google sign out error:", error)
             }
 
@@ -140,17 +140,17 @@ const ManagerScreen = () => {
         <StatusBar barStyle="light-content" backgroundColor="#3949AB" />
         <View style={styles.loadingContent}>
           <ActivityIndicator size="large" color="#5C6BC0" />
-          <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
-          <TouchableOpacity
-            style={styles.skipButton}
+        <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
+        <TouchableOpacity 
+          style={styles.skipButton}
             onPress={() => {
               // Force skip loading
               refreshStats()
               refreshActivities()
             }}
-          >
-            <Text style={styles.skipButtonText}>Bỏ qua</Text>
-          </TouchableOpacity>
+        >
+          <Text style={styles.skipButtonText}>Bỏ qua</Text>
+        </TouchableOpacity>
         </View>
       </SafeAreaView>
     )
@@ -178,20 +178,20 @@ const ManagerScreen = () => {
           </TouchableOpacity>
         </View>
       </View>
-
+      
       {/* Search Bar */}
       {showSearch && (
         <SearchBar
-          value={searchQuery}
-          onChangeText={handleSearch}
+              value={searchQuery}
+              onChangeText={handleSearch}
           placeholder="Tìm kiếm hoạt động..."
-          autoFocus
+              autoFocus
           onClear={() => setSearchQuery("")}
         />
       )}
 
       {/* Main Content */}
-      <ScrollView
+      <ScrollView 
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -201,47 +201,47 @@ const ManagerScreen = () => {
         {/* Profile Section */}
         <View style={styles.profileSection}>
           <ProfileHeader profile={profile} onEditPress={() => router.push("./StaffTaiKhoan")} />
-        </View>
+            </View>
 
         {/* Statistics Section
         <View style={styles.statsContainer}>
           <Text style={styles.statsTitle}>Thống kê tổng quan</Text>
           <View style={styles.statsGrid}>
-            <StatCard
-              value={stats.totalActivities}
-              label="Tổng hoạt động"
-              icon="calendar-outline"
+          <StatCard 
+            value={stats.totalActivities} 
+            label="Tổng hoạt động" 
+            icon="calendar-outline" 
               color="#3949AB"
               previousValue={0}
               delay={100}
-            />
-            <StatCard
-              value={stats.approvedActivities}
-              label="Đã duyệt"
-              icon="checkmark-circle-outline"
+          />
+          <StatCard 
+            value={stats.approvedActivities} 
+            label="Đã duyệt" 
+            icon="checkmark-circle-outline" 
               color="#43A047"
               previousValue={0}
               delay={200}
-            />
-            <StatCard
-              value={stats.pendingActivities}
-              label="Chờ duyệt"
-              icon="time-outline"
+          />
+          <StatCard 
+            value={stats.pendingActivities} 
+            label="Chờ duyệt" 
+            icon="time-outline" 
               color="#FB8C00"
               previousValue={0}
               delay={300}
-            />
-            <StatCard
-              value={stats.totalStudents}
-              label="Sinh viên"
-              icon="people-outline"
+          />
+          <StatCard 
+            value={stats.totalStudents} 
+            label="Sinh viên" 
+            icon="people-outline" 
               color="#8E24AA"
               previousValue={0}
               delay={400}
-            />
-          </View>
+          />
+        </View>
         </View> */}
-
+        
         {/* Quick Actions Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -250,8 +250,8 @@ const ManagerScreen = () => {
           </View>
           <View style={styles.quickActionButtons}>
             <NavigationButton
-              title="Tạo hoạt động"
-              icon="add-circle-outline"
+              title="Tạo hoạt động" 
+              icon="add-circle-outline" 
               onPress={() => router.push("./StaffTaoHD")}
               color="#3949AB"
               containerStyle={styles.quickActionButton}
@@ -259,8 +259,8 @@ const ManagerScreen = () => {
               route="./StaffTaoHD"
             />
             <NavigationButton
-              title="Duyệt hoạt động"
-              icon="checkmark-circle-outline"
+              title="Duyệt hoạt động" 
+              icon="checkmark-circle-outline" 
               onPress={() => router.push("./DuyetHD")}
               color="#43A047"
               containerStyle={styles.quickActionButton}
@@ -268,8 +268,8 @@ const ManagerScreen = () => {
               route="./DuyetHD"
             />
             <NavigationButton
-              title="Gửi thông báo"
-              icon="notifications-outline"
+              title="Gửi thông báo" 
+              icon="notifications-outline" 
               onPress={() => router.push("./QuanLyTB")}
               color="#FB8C00"
               containerStyle={styles.quickActionButton}
@@ -289,7 +289,7 @@ const ManagerScreen = () => {
             </TouchableOpacity>
           </View>
           <View style={styles.sectionDivider} />
-
+          
           {filteredActivities.length > 0 ? (
             <FlatList
               data={filteredActivities}
@@ -323,7 +323,7 @@ const ManagerScreen = () => {
             </View>
           )}
         </View>
-
+        
         {/* Main Navigation Section */}
         <View style={styles.navigationSection}>
           <View style={styles.sectionHeader}>
@@ -332,8 +332,8 @@ const ManagerScreen = () => {
           </View>
           <View style={styles.buttonContainer}>
             <NavigationButton
-              title="Quản lý hoạt động"
-              icon="calendar-outline"
+              title="Quản lý hoạt động" 
+              icon="calendar-outline" 
               onPress={() => router.push("./QuanLyHD")}
               color="#3949AB"
               delay={100}
@@ -349,31 +349,31 @@ const ManagerScreen = () => {
             />
             <NavigationButton
               title="Thống kê"
-              icon="bar-chart-outline"
+              icon="bar-chart-outline" 
               onPress={() => router.push("./ThongKeHD")}
               color="#FB8C00"
               delay={150}
               route="./ThongKeHD"
             />
             <NavigationButton
-              title="Quản lý sinh viên"
-              icon="people-outline"
+              title="Quản lý sinh viên" 
+              icon="people-outline" 
               onPress={() => router.push("./QuanLySV")}
               color="#43A047"
               delay={200}
               route="./QuanLySV"
             />
             <NavigationButton
-              title="Báo cáo"
-              icon="document-text-outline"
+              title="Báo cáo" 
+              icon="document-text-outline" 
               onPress={() => router.push("./BaoCaoHD")}
               color="#8E24AA"
               delay={250}
               route="./BaoCaoHD"
             />
             <NavigationButton
-              title="Duyệt hoạt động"
-              icon="checkmark-circle-outline"
+              title="Duyệt hoạt động" 
+              icon="checkmark-circle-outline" 
               onPress={() => router.push("./DuyetHD")}
               color="#E53935"
               delay={300}
@@ -381,15 +381,15 @@ const ManagerScreen = () => {
             />
             <NavigationButton
               title="Duyệt sinh viên"
-              icon="person-add-outline"
+              icon="person-add-outline" 
               onPress={() => router.push("./DuyetSV")}
               color="#1E88E5"
               delay={350}
               route="./DuyetSV"
             />
             <NavigationButton
-              title="Quản lý thông báo"
-              icon="notifications-outline"
+              title="Quản lý thông báo" 
+              icon="notifications-outline" 
               onPress={() => router.push("./QuanLyTB")}
               color="#6D4C41"
               delay={400}
@@ -404,8 +404,8 @@ const ManagerScreen = () => {
               route="./GuiTLSH"
             />
             <NavigationButton
-              title="Cài đặt"
-              icon="settings-outline"
+              title="Cài đặt" 
+              icon="settings-outline" 
               onPress={() => router.push("./CaiDat")}
               color="#546E7A"
               delay={450}
@@ -413,7 +413,7 @@ const ManagerScreen = () => {
             />
           </View>
         </View>
-
+        
         <View style={styles.footer}>
           <View style={styles.footerDivider} />
           <Text style={styles.footerText}>© 2024 BTV DEVELOPER</Text>

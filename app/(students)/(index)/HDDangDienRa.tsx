@@ -1,144 +1,186 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, SafeAreaView, ActivityIndicator, Dimensions } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, arrayUnion, Timestamp } from '@react-native-firebase/firestore';
-import { getAuth } from '@react-native-firebase/auth';
 import { useRouter } from 'expo-router';
-
-const screenWidth = Dimensions.get('window').width;
-const screenHeight = Dimensions.get('window').height;
+import { getFirestore, collection, query, where, getDocs, doc, updateDoc, arrayUnion, Timestamp, getDoc } from '@react-native-firebase/firestore';
+import { useAuth } from '../../(staffs)/(index)/AuthContext';
+import { format } from 'date-fns';
+import { vi } from 'date-fns/locale';
 
 interface Activity {
   id: string;
   name: string;
+  notes: string;
   location: string;
   startDate: Timestamp;
   endDate: Timestamp;
-  participants?: string[];
-  pendingParticipants?: string[];
-  [key: string]: any;
+  startTime: string;
+  endTime: string;
+  activityType: string;
+  points: number;
+  bannerImageUrl: string;
+  participants: string[];
+  pendingParticipants: string[];
 }
 
-const HoatDongDangDienRa = () => {
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+const HDDangDienRa = () => {
   const router = useRouter();
-  const db = getFirestore();
-  const auth = getAuth();
+  const { user } = useAuth();
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [registering, setRegistering] = useState<string | null>(null);
 
   useEffect(() => {
-    const currentUser = auth.currentUser;
-    if (currentUser) {
-      setUserId(currentUser.uid);
-    }
-    fetchOngoingActivities();
-  }, []);
+    console.log('Current user:', user); // Debug log
+    fetchActivities();
+  }, [user]); // Add user to dependency array
 
-  const fetchOngoingActivities = async () => {
-    setLoading(true);
+  const fetchActivities = async () => {
     try {
+      const db = getFirestore();
       const now = Timestamp.now();
+      
       const activitiesQuery = query(
         collection(db, 'activities'),
         where('startDate', '<=', now),
         where('endDate', '>=', now)
       );
-      const snapshot = await getDocs(activitiesQuery);
-      const activitiesList = snapshot.docs.map(doc => ({
+
+      const querySnapshot = await getDocs(activitiesQuery);
+      const fetchedActivities = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
-      } as Activity));
-      setActivities(activitiesList);
+      })) as Activity[];
+
+      setActivities(fetchedActivities);
     } catch (error) {
-      console.error('Error fetching ongoing activities:', error);
-      Alert.alert('Error', 'Failed to fetch ongoing activities');
+      console.error('Error fetching activities:', error);
+      Alert.alert('Lỗi', 'Không thể tải danh sách hoạt động');
     } finally {
       setLoading(false);
     }
   };
 
-  const registerForActivity = async (activityId: string) => {
-    if (!userId) {
-      Alert.alert('Lỗi', 'Người dùng chưa đăng nhập');
+  const handleRegister = async (activityId: string) => {
+    console.log('Registering for activity:', activityId);
+    console.log('Current user:', user); // Debug log
+
+    if (!user?.uid) {
+      console.error('No user found');
+      Alert.alert('Lỗi', 'Không tìm thấy thông tin người dùng');
       return;
     }
 
     try {
+      setRegistering(activityId);
+      const db = getFirestore();
       const activityRef = doc(db, 'activities', activityId);
+
+      // Check if already registered
       const activityDoc = await getDoc(activityRef);
       const activityData = activityDoc.data() as Activity | undefined;
 
-      if (!activityData) {
-        Alert.alert('Lỗi', 'Không tìm thấy thông tin hoạt động');
+      if (activityData?.participants?.includes(user.uid)) {
+        Alert.alert('Thông báo', 'Bạn đã được duyệt tham gia hoạt động này');
         return;
       }
 
-      if (activityData.participants?.includes(userId)) {
-        Alert.alert('Đã đăng ký', 'Bạn đã đăng ký tham gia hoạt động này');
-        return;
-      }
-
-      if (activityData.pendingParticipants?.includes(userId)) {
-        Alert.alert('Đang chờ duyệt', 'Bạn đã đăng ký và đang chờ phê duyệt cho hoạt động này');
+      if (activityData?.pendingParticipants?.includes(user.uid)) {
+        Alert.alert('Thông báo', 'Bạn đã gửi yêu cầu đăng ký và đang chờ duyệt');
         return;
       }
 
       await updateDoc(activityRef, {
-        pendingParticipants: arrayUnion(userId)
+        pendingParticipants: arrayUnion(user.uid)
       });
-      Alert.alert('Thành công', 'Đăng ký thành công! Vui lòng chờ phê duyệt.');
-      fetchOngoingActivities();
+
+      Alert.alert('Thành công', 'Đã gửi yêu cầu đăng ký tham gia');
+      fetchActivities(); // Refresh activities list
     } catch (error) {
-      console.error('Lỗi khi đăng ký hoạt động:', error);
-      Alert.alert('Lỗi', 'Không thể đăng ký hoạt động');
+      console.error('Error registering:', error);
+      Alert.alert('Lỗi', 'Không thể đăng ký tham gia');
+    } finally {
+      setRegistering(null);
     }
   };
 
-  const handleAttendance = (activityId: string) => {
+  const getRegistrationStatus = (activity: Activity) => {
+    if (!user) return null;
+    
+    if (activity.participants?.includes(user.uid)) {
+      return 'approved';
+    }
+    if (activity.pendingParticipants?.includes(user.uid)) {
+      return 'pending';
+    }
+    return null;
+  };
+
+  const renderRegistrationButton = (activity: Activity) => {
+    const status = getRegistrationStatus(activity);
+    
+    if (status === 'approved') {
+      return (
+        <View style={[styles.statusBadge, styles.approvedBadge]}>
+          <Ionicons name="checkmark-circle" size={16} color="#fff" />
+          <Text style={styles.statusText}>Đã được duyệt</Text>
+        </View>
+      );
+    }
+    
+    if (status === 'pending') {
+      return (
+        <View style={[styles.statusBadge, styles.pendingBadge]}>
+          <Ionicons name="time" size={16} color="#fff" />
+          <Text style={styles.statusText}>Đang chờ duyệt</Text>
+        </View>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.registerButton}
+        onPress={() => handleRegister(activity.id)}
+        disabled={registering === activity.id}
+      >
+        {registering === activity.id ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <>
+            <Ionicons name="add-circle" size={20} color="#fff" />
+            <Text style={styles.registerButtonText}>Đăng ký tham gia</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  const handleActivityPress = (activityId: string) => {
     router.push({
-      pathname: './DiemDanhHD',
-      params: { activityId }
+      pathname: '/(students)/(index)/ChiTietHD',
+      params: { id: activityId }
     });
   };
 
-  const renderActivityItem = ({ item }: { item: Activity }) => (
-    <View style={styles.activityItem}>
-      <View style={styles.activityContent}>
-        <Text style={styles.activityName}>{item.name}</Text>
-        <View style={styles.infoContainer}>
-          <Ionicons name="location-outline" size={16} color="#666666" />
-          <Text style={styles.activityInfo}>{item.location}</Text>
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
         </View>
-        <View style={styles.infoContainer}>
-          <Ionicons name="calendar-outline" size={16} color="#666666" />
-          <Text style={styles.activityInfo}>
-            {item.startDate.toDate().toLocaleDateString()} - {item.endDate.toDate().toLocaleDateString()}
-          </Text>
-        </View>
-        <View style={styles.infoContainer}>
-          <Ionicons name="people-outline" size={16} color="#666666" />
-          <Text style={styles.activityInfo}>
-            {(item.participants && item.participants.length) || 0} người tham gia
-          </Text>
-        </View>
-      </View>
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity
-          style={styles.registerButton}
-          onPress={() => registerForActivity(item.id)}
-        >
-          <Text style={styles.buttonText}>Đăng ký</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.attendanceButton}
-          onPress={() => handleAttendance(item.id)}
-        >
-          <Text style={styles.buttonText}>Điểm danh</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -146,26 +188,69 @@ const HoatDongDangDienRa = () => {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
-        <Text style={styles.title}>Hoạt động đang diễn ra</Text>
-        <TouchableOpacity onPress={fetchOngoingActivities} style={styles.refreshButton}>
-          <Ionicons name="refresh-outline" size={24} color="#007AFF" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Hoạt động đang diễn ra</Text>
+        <View style={styles.headerRight} />
       </View>
-      {loading ? (
-        <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
-      ) : activities.length > 0 ? (
-        <FlatList
-          data={activities}
-          renderItem={renderActivityItem}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.listContent}
-        />
-      ) : (
-        <View style={styles.emptyState}>
-          <Ionicons name="calendar-outline" size={screenWidth * 0.15} color="#CCC" />
-          <Text style={styles.emptyText}>Không có hoạt động nào đang diễn ra</Text>
-        </View>
-      )}
+
+      <ScrollView style={styles.content}>
+        {activities.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="calendar" size={48} color="#ccc" />
+            <Text style={styles.emptyText}>Không có hoạt động nào đang diễn ra</Text>
+          </View>
+        ) : (
+          activities.map((activity) => (
+            <TouchableOpacity
+              key={activity.id}
+              style={styles.activityCard}
+              onPress={() => handleActivityPress(activity.id)}
+            >
+              {activity.bannerImageUrl && (
+                <Image
+                  source={{ uri: activity.bannerImageUrl }}
+                  style={styles.bannerImage}
+                  resizeMode="cover"
+                />
+              )}
+              
+              <View style={styles.activityContent}>
+                <View style={styles.activityHeader}>
+                  <Text style={styles.activityType}>{activity.activityType}</Text>
+                  <Text style={styles.points}>{activity.points} điểm</Text>
+                </View>
+
+                <Text style={styles.activityName}>{activity.name}</Text>
+                <Text style={styles.activityDescription} numberOfLines={2}>
+                  {activity.notes}
+                </Text>
+
+                <View style={styles.activityInfo}>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="location" size={16} color="#666" />
+                    <Text style={styles.infoText}>{activity.location}</Text>
+                  </View>
+                  
+                  <View style={styles.infoRow}>
+                    <Ionicons name="calendar" size={16} color="#666" />
+                    <Text style={styles.infoText}>
+                      {format(activity.startDate.toDate(), 'dd/MM/yyyy', { locale: vi })} - {format(activity.endDate.toDate(), 'dd/MM/yyyy', { locale: vi })}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.infoRow}>
+                    <Ionicons name="time" size={16} color="#666" />
+                    <Text style={styles.infoText}>
+                      {activity.startTime} - {activity.endTime}
+                    </Text>
+                  </View>
+                </View>
+
+                {renderRegistrationButton(activity)}
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -173,107 +258,144 @@ const HoatDongDangDienRa = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F5',
+    backgroundColor: '#fff',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: screenWidth * 0.04,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  backButton: {
-    padding: screenWidth * 0.02,
-  },
-  refreshButton: {
-    padding: screenWidth * 0.02,
-  },
-  title: {
-    fontSize: screenWidth * 0.05,
-    fontWeight: 'bold',
-    color: '#333333',
-    flex: 1,
-    textAlign: 'center',
-  },
-  loader: {
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  listContent: {
-    padding: screenWidth * 0.04,
-  },
-  activityItem: {
-    backgroundColor: '#FFFFFF',
-    padding: screenWidth * 0.04,
-    marginBottom: screenHeight * 0.02,
-    borderRadius: 8,
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E9F0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A2138',
+  },
+  headerRight: {
+    width: 40,
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  activityCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  bannerImage: {
+    width: '100%',
+    height: 160,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   activityContent: {
-    flex: 1,
+    padding: 16,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  activityType: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  points: {
+    fontSize: 14,
+    color: '#FF9500',
+    fontWeight: '500',
   },
   activityName: {
-    fontSize: screenWidth * 0.045,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: screenHeight * 0.01,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A2138',
+    marginBottom: 8,
   },
-  infoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: screenHeight * 0.005,
+  activityDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 20,
   },
   activityInfo: {
-    fontSize: screenWidth * 0.035,
-    color: '#666666',
-    marginLeft: screenWidth * 0.02,
+    marginBottom: 16,
   },
-  buttonContainer: {
-    marginLeft: screenWidth * 0.04,
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  infoText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#666',
   },
   registerButton: {
-    backgroundColor: '#4CAF50',
-    padding: screenWidth * 0.03,
-    borderRadius: 8,
-    marginBottom: screenHeight * 0.01,
-    minWidth: screenWidth * 0.2,
-  },
-  attendanceButton: {
-    backgroundColor: '#FFA000',
-    padding: screenWidth * 0.03,
-    borderRadius: 8,
-    minWidth: screenWidth * 0.2,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: screenWidth * 0.035,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: screenWidth * 0.04,
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    padding: 12,
+    borderRadius: 8,
   },
-  emptyText: {
-    fontSize: screenWidth * 0.04,
-    color: '#666666',
-    marginTop: screenHeight * 0.02,
-    textAlign: 'center',
+  registerButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+  },
+  pendingBadge: {
+    backgroundColor: '#FF9500',
+  },
+  approvedBadge: {
+    backgroundColor: '#34C759',
+  },
+  statusText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
 
-export default HoatDongDangDienRa;
+export default HDDangDienRa;

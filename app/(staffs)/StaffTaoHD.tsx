@@ -20,6 +20,7 @@ interface FormErrors {
   time?: string;
   activityType?: string;
   planFile?: string;
+  points?: string;
 }
 
 interface Coordinates {
@@ -44,6 +45,7 @@ interface Activity {
   activityType: string;
   planFileUrl?: string;
   bannerImageUrl?: string;
+  points: number;
 }
 
 const activityTypes = [
@@ -83,6 +85,7 @@ const TaoHD = () => {
   const auth = getAuth()
   const db = getFirestore()
   const storage = getStorage()
+  const [points, setPoints] = useState("")
 
   useEffect(() => {
     Animated.parallel([
@@ -165,6 +168,12 @@ const TaoHD = () => {
       errors.participantLimit = "Số lượng tuyển phải là số dương"
     }
 
+    if (!points.trim()) {
+      errors.points = "Vui lòng nhập điểm quy đổi"
+    } else if (isNaN(Number(points)) || parseFloat(points) < 0) {
+      errors.points = "Điểm quy đổi phải là số không âm"
+    }
+
     if (startDate > endDate) {
       errors.date = "Ngày bắt đầu phải trước ngày kết thúc"
     }
@@ -176,6 +185,24 @@ const TaoHD = () => {
     setFormErrors(errors)
     return Object.keys(errors).length === 0
   }
+
+  const resetForm = () => {
+    setActivityName("");
+    setStartDate(new Date());
+    setEndDate(new Date(new Date().setDate(new Date().getDate() + 1)));
+    setStartTime(new Date());
+    setEndTime(new Date(new Date().setHours(new Date().getHours() + 2)));
+    setNotes("");
+    setParticipantLimit("");
+    setLocation("");
+    setLocationError("");
+    setFormErrors({});
+    setCurrentCoordinates(null);
+    setActivityType("");
+    setPlanFile(null);
+    setBannerImage(null);
+    setPoints("");
+  };
 
   const handleCreateActivity = async () => {
     if (!validateForm()) {
@@ -243,6 +270,7 @@ const TaoHD = () => {
         activityType,
         planFileUrl,
         bannerImageUrl,
+        points: parseFloat(points),
       }
 
       const docRef = await addDoc(collection(db, "activities"), newActivity)
@@ -269,7 +297,13 @@ const TaoHD = () => {
 
       setIsLoading(false)
       Alert.alert("Thành công", "Hoạt động đã được tạo và đang chờ duyệt", [
-        { text: "OK", onPress: () => router.back() },
+        { 
+          text: "OK", 
+          onPress: () => {
+            resetForm();
+            router.back();
+          } 
+        },
       ])
     } catch (error) {
       console.error("Error creating activity:", error)
@@ -600,6 +634,23 @@ const TaoHD = () => {
               multiline
               textAlignVertical="top"
             />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>
+              Điểm quy đổi <Text style={styles.required}>*</Text>
+            </Text>
+            <TextInput
+              style={[styles.input, formErrors.points ? styles.inputError : null]}
+              placeholder="Nhập điểm quy đổi"
+              value={points}
+              onChangeText={(text) => {
+                setPoints(text)
+                setFormErrors({ ...formErrors, points: "" })
+              }}
+              keyboardType="numeric"
+            />
+            {formErrors.points ? <Text style={styles.errorText}>{formErrors.points}</Text> : null}
           </View>
 
           <TouchableOpacity

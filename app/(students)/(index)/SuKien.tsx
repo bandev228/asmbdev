@@ -1,151 +1,117 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator, TextInput, FlatList, Image } from 'react-native';
-import { getFirestore, collection, query, where, getDocs, orderBy, limit } from '@react-native-firebase/firestore';
-import { getAuth } from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { useEvents, Event } from './hooks/useEvents';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
 
-interface Event {
-  id: string;
-  name: string;
-  description: string;
-  startDate: Date;
-  endDate: Date;
-  location: string;
-  participantLimit: number;
-  participants: number;
-  status: 'pending' | 'approved' | 'rejected';
-  category?: string;
-  imageUrl?: string;
-  organizer?: string;
-  contact?: string;
-}
-
 const SuKien = () => {
-  const [events, setEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const router = useRouter();
-  const auth = getAuth();
-  const db = getFirestore();
-
-  useEffect(() => {
-    fetchEvents();
-  }, []);
-
-  const fetchEvents = async () => {
-    try {
-      setLoading(true);
-      const now = new Date();
-      
-      const eventsQuery = query(
-        collection(db, "activities"),
-        where("startDate", ">", now),
-        orderBy("startDate", "asc"),
-        limit(20)
-      );
-
-      const snapshot = await getDocs(eventsQuery);
-      const eventsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        startDate: doc.data().startDate?.toDate(),
-        endDate: doc.data().endDate?.toDate()
-      })) as Event[];
-
-      setEvents(eventsData);
-      setLoading(false);
-    } catch (err) {
-      console.error("Error fetching events:", err);
-      setError(err instanceof Error ? err.message : "Unknown error occurred");
-      setLoading(false);
-    }
-  };
+  const { events, loading, error, refetch } = useEvents();
 
   const filteredEvents = events.filter(event => {
     const matchesSearch = event.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         event.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = !selectedCategory || event.category === selectedCategory;
+                         event.notes.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = !selectedCategory || event.activityType === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
-  const categories = Array.from(new Set(events.map(event => event.category || 'Khác')));
+  const categories = Array.from(new Set(events.map(event => event.activityType || 'Khác')));
 
-  const renderEventCard = ({ item }: { item: Event }) => (
-    <TouchableOpacity
-      style={styles.eventCard}
-      onPress={() => router.push({
-        pathname: './ChiTietHD',
-        params: { id: item.id }
-      })}
-    >
-      {item.imageUrl && (
-        <Image 
-          source={{ uri: item.imageUrl }} 
-          style={styles.eventImage}
-          resizeMode="cover"
-        />
-      )}
-      <View style={styles.eventContent}>
-        <View style={styles.eventHeader}>
-          <Text style={styles.eventTitle} numberOfLines={2}>{item.name}</Text>
-          <View style={styles.participantCount}>
-            <Ionicons name="people" size={16} color="#007AFF" />
-            <Text style={styles.participantCountText}>
-              {item.participants}/{item.participantLimit}
-            </Text>
+  const renderEventCard = ({ item }: { item: Event }) => {
+    return (
+      <TouchableOpacity
+        style={styles.eventCard}
+        onPress={() => router.push({
+          pathname: './ChiTietHD',
+          params: { id: item.id }
+        })}
+      >
+        {item.bannerImageUrl ? (
+          <Image 
+            source={{ uri: item.bannerImageUrl }} 
+            style={styles.eventImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.eventImage, styles.placeholderImage]}>
+            <Ionicons name="image-outline" size={40} color="#ccc" />
           </View>
-        </View>
+        )}
         
-        <Text style={styles.eventDescription} numberOfLines={2}>
-          {item.description}
-        </Text>
-
-        <View style={styles.eventInfo}>
-          <View style={styles.infoRow}>
-            <Ionicons name="calendar-outline" size={16} color="#666" />
-            <Text style={styles.infoText}>
-              {format(item.startDate, "dd/MM/yyyy HH:mm", { locale: vi })}
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#666" />
-            <Text style={styles.infoText}>{item.location}</Text>
-          </View>
-          {item.organizer && (
-            <View style={styles.infoRow}>
-              <Ionicons name="person-outline" size={16} color="#666" />
-              <Text style={styles.infoText}>{item.organizer}</Text>
+        <View style={styles.eventContent}>
+          <View style={styles.eventHeader}>
+            <Text style={styles.eventTitle} numberOfLines={2}>{item.name}</Text>
+            <View style={styles.pointsContainer}>
+              <Ionicons name="trophy" size={16} color="#FFD700" />
+              <Text style={styles.pointsText}>{item.points} điểm</Text>
             </View>
-          )}
-        </View>
+          </View>
+          
+          <Text style={styles.eventDescription} numberOfLines={2}>
+            {item.notes}
+          </Text>
 
-        <View style={styles.eventFooter}>
-          <View style={[
-            styles.categoryBadge,
-            { backgroundColor: getCategoryColor(item.category || 'Khác') }
-          ]}>
-            <Text style={styles.categoryText}>{item.category || 'Khác'}</Text>
+          <View style={styles.eventInfo}>
+            <View style={styles.infoRow}>
+              <Ionicons name="calendar-outline" size={16} color="#666" />
+              <Text style={styles.infoText}>
+                {format(item.startDate.toDate(), "dd/MM/yyyy", { locale: vi })} - {format(item.endDate.toDate(), "dd/MM/yyyy", { locale: vi })}
+              </Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Ionicons name="time-outline" size={16} color="#666" />
+              <Text style={styles.infoText}>
+                {format(item.startDate.toDate(), "HH:mm", { locale: vi })} - {format(item.endDate.toDate(), "HH:mm", { locale: vi })}
+              </Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Ionicons name="location-outline" size={16} color="#666" />
+              <Text style={styles.infoText}>{item.location}</Text>
+            </View>
           </View>
-          <View style={[
-            styles.statusBadge,
-            { backgroundColor: item.status === 'approved' ? '#4CAF50' : '#FFC107' }
-          ]}>
-            <Text style={styles.statusText}>
-              {item.status === 'approved' ? 'Đã phê duyệt' : 'Đang chờ'}
-            </Text>
+
+          <View style={styles.eventFooter}>
+            <View style={[
+              styles.categoryBadge,
+              { backgroundColor: getCategoryColor(item.activityType) }
+            ]}>
+              <Text style={styles.categoryText}>{item.activityType}</Text>
+            </View>
+            <View style={[
+              styles.statusBadge,
+              { backgroundColor: getStatusColor(item.status) }
+            ]}>
+              <Text style={styles.statusText}>
+                {getStatusText(item.status)}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
+
+  const renderCategoryButton = (category: string | null) => {
+    const isSelected = category === selectedCategory;
+    return (
+      <TouchableOpacity
+        key={category || 'all'}
+        style={[styles.categoryButton, isSelected && styles.selectedCategoryButton]}
+        onPress={() => setSelectedCategory(category)}
+      >
+        <Text style={[styles.categoryButtonText, isSelected && styles.selectedCategoryText]}>
+          {category || 'Tất cả'}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
@@ -159,6 +125,9 @@ const SuKien = () => {
     return (
       <View style={styles.container}>
         <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={refetch}>
+          <Text style={styles.retryButtonText}>Thử lại</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -170,7 +139,7 @@ const SuKien = () => {
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Sự kiện sắp tới</Text>
-        <TouchableOpacity onPress={fetchEvents} style={styles.refreshButton}>
+        <TouchableOpacity onPress={refetch} style={styles.refreshButton}>
           <Ionicons name="refresh-outline" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
@@ -191,38 +160,20 @@ const SuKien = () => {
         style={styles.categoryContainer}
         contentContainerStyle={styles.categoryContent}
       >
-        <TouchableOpacity
-          style={[styles.categoryButton, !selectedCategory && styles.selectedCategoryButton]}
-          onPress={() => setSelectedCategory(null)}
-        >
-          <Text style={[styles.categoryButtonText, !selectedCategory && styles.selectedCategoryText]}>
-            Tất cả
-          </Text>
-        </TouchableOpacity>
-        {categories.map(category => (
-          <TouchableOpacity
-            key={category}
-            style={[styles.categoryButton, selectedCategory === category && styles.selectedCategoryButton]}
-            onPress={() => setSelectedCategory(category)}
-          >
-            <Text style={[styles.categoryButtonText, selectedCategory === category && styles.selectedCategoryText]}>
-              {category}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {[null, ...categories].map(renderCategoryButton)}
       </ScrollView>
 
       <FlatList
         data={filteredEvents}
         renderItem={renderEventCard}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="calendar-outline" size={48} color="#999" />
             <Text style={styles.emptyText}>Không có sự kiện nào sắp diễn ra</Text>
-          </View>
+    </View>
         }
       />
     </SafeAreaView>
@@ -238,6 +189,24 @@ const getCategoryColor = (category: string): string => {
     'Khác': '#607D8B'
   };
   return colors[category] || '#607D8B';
+};
+
+const getStatusColor = (status: string): string => {
+  const colors: { [key: string]: string } = {
+    'pending': '#FFC107',
+    'approved': '#4CAF50',
+    'rejected': '#F44336'
+  };
+  return colors[status] || '#607D8B';
+};
+
+const getStatusText = (status: string): string => {
+  const texts: { [key: string]: string } = {
+    'pending': 'Đang chờ',
+    'approved': 'Đã duyệt',
+    'rejected': 'Đã từ chối'
+  };
+  return texts[status] || 'Không xác định';
 };
 
 const styles = StyleSheet.create({
@@ -344,7 +313,14 @@ const styles = StyleSheet.create({
   },
   eventImage: {
     width: '100%',
-    height: screenHeight * 0.2,
+    height: 200,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  placeholderImage: {
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   eventContent: {
     padding: screenWidth * 0.04,
@@ -362,17 +338,17 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: screenWidth * 0.02,
   },
-  participantCount: {
+  pointsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E3F2FD',
+    backgroundColor: '#FFF8E1',
     paddingHorizontal: screenWidth * 0.02,
     paddingVertical: screenWidth * 0.01,
     borderRadius: 12,
   },
-  participantCountText: {
+  pointsText: {
     fontSize: screenWidth * 0.035,
-    color: '#007AFF',
+    color: '#FF9800',
     fontWeight: '500',
     marginLeft: screenWidth * 0.01,
   },
@@ -435,6 +411,18 @@ const styles = StyleSheet.create({
     color: 'red',
     textAlign: 'center',
     marginTop: screenHeight * 0.02,
+  },
+  retryButton: {
+    marginTop: screenHeight * 0.02,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: screenWidth * 0.04,
+    paddingVertical: screenHeight * 0.01,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: screenWidth * 0.035,
+    fontWeight: '500',
   },
 });
 
