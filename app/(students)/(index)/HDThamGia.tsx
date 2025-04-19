@@ -131,7 +131,7 @@ const HoatDongThamGia = () => {
           <View style={styles.infoRow}>
             <Ionicons name="calendar-outline" size={16} color="#666" />
             <Text style={styles.infoText}>
-              {format(item.startDate, "dd/MM/yyyy HH:mm", { locale: vi })}
+              {format(item.startDate, "dd/MM/yyyy HH:mm", { locale: vi })} - {format(item.endDate, "dd/MM/yyyy HH:mm", { locale: vi })}
             </Text>
           </View>
           <View style={styles.infoRow}>

@@ -412,32 +412,18 @@ const StudentDashboard = () => {
               delay={100}
             />
             <NavigationButton
-              title="Hoạt động tham gia"
+              title="Đã tham gia"
               icon="list-outline"
               onPress={() => router.push("./HDThamGia")}
               color="#FB8C00"
               delay={150}
             />
             <NavigationButton
-              title="Thống kê"
-              icon="bar-chart-outline"
-              onPress={() => router.push("./ThongKeHD")}
-              color="#43A047"
-              delay={200}
-            />
-            <NavigationButton
-              title="Thông tin sinh viên"
+              title="Thông tin cá nhân"
               icon="person-outline"
               onPress={() => router.push("./ThongTinSV")}
               color="#8E24AA"
               delay={250}
-            />
-            <NavigationButton
-              title="Lịch sử điểm danh"
-              icon="time-outline"
-              onPress={() => router.push("./LSDiemDanh")}
-              color="#E53935"
-              delay={300}
             />
             <NavigationButton
               title="Tài liệu sinh hoạt"
@@ -454,6 +440,20 @@ const StudentDashboard = () => {
               delay={400}
             />
             <NavigationButton
+              title="Bạn bè"
+              icon="people-outline"
+              onPress={() => router.push("./FriendsListScreen")}
+              color="#FF9800"
+              delay={500}
+            />
+            <NavigationButton
+              title="Thống kê"
+              icon="bar-chart-outline"
+              onPress={() => router.push("./ThongKeHD")}
+              color="#43A047"
+              delay={200}
+            />
+            <NavigationButton
               title="Cài đặt"
               icon="settings-outline"
               onPress={() => router.push("./CaiDat")}
@@ -461,11 +461,11 @@ const StudentDashboard = () => {
               delay={450}
             />
             <NavigationButton
-              title="Bạn bè"
-              icon="people-outline"
-              onPress={() => router.push("./FriendsListScreen")}
-              color="#FF9800"
-              delay={500}
+              title="Lịch sử điểm danh"
+              icon="time-outline"
+              onPress={() => Alert.alert("Thông báo", "Tính năng này sẽ sớm được cập nhật")}
+              color="#E53935"
+              delay={300}
             />
             {/* <NavigationButton
               title="Chat"
@@ -479,7 +479,7 @@ const StudentDashboard = () => {
 
         <View style={styles.footer}>
           <View style={styles.footerDivider}/>
-          <Text style={styles.footerText}>© 2025 BTV DEV Academy</Text>
+          <Text style={styles.footerText}>© 2024 BTV DEV Academy</Text>
           <Text style={styles.footerVersion}>Phiên bản 1.0.0</Text>
         </View>
       </ScrollView>

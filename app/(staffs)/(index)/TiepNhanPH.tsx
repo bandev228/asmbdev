@@ -379,7 +379,7 @@ const TiepNhanPH = () => {
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={48} color="#C7C7CC" />
             <Text style={styles.emptyStateText}>Không có phản hồi nào</Text>
-          </View>
+    </View>
         }
       />
 

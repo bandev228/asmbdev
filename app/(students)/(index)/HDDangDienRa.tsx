@@ -1,14 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Alert, Modal, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -32,7 +23,24 @@ interface Activity {
   participants: string[];
   pendingParticipants: string[];
   isAttendanceEnabled?: boolean;
+  maxParticipants?: number;
+  status?: string;
+  organizer?: string;
+  requirements?: string;
 }
+
+const formatParticipantCount = (participants: string[] = [], maxParticipants?: number) => {
+  const currentCount = participants.length;
+  if (maxParticipants) {
+    return `${currentCount}/${maxParticipants} người tham gia`;
+  }
+  return `${currentCount} người tham gia`;
+};
+
+const formatDateTime = (date: Timestamp, time: string) => {
+  const formattedDate = format(date.toDate(), 'dd/MM/yyyy', { locale: vi });
+  return `${formattedDate} lúc ${time}`;
+};
 
 const HDDangDienRa = () => {
   const router = useRouter();
@@ -40,6 +48,8 @@ const HDDangDienRa = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState<string | null>(null);
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   useEffect(() => {
     if (initializing) {
@@ -167,7 +177,9 @@ const HDDangDienRa = () => {
     });
   };
 
-  const renderRegistrationButton = (activity: Activity) => {
+  const renderRegistrationButton = (activity: Activity | null) => {
+    if (!activity) return null;
+    
     const status = getRegistrationStatus(activity);
     
     if (status === 'approved') {
@@ -215,11 +227,140 @@ const HDDangDienRa = () => {
     );
   };
 
-  const handleActivityPress = (activityId: string) => {
-    router.push({
-      pathname: '/(students)/(index)/ChiTietHD',
-      params: { id: activityId }
-    });
+  const handleActivityPress = (activity: Activity) => {
+    // console.log('Selected activity:', activity); // Debug log
+    setSelectedActivity(activity);
+    setModalVisible(true);
+  };
+
+  const renderActivityModal = () => {
+    if (!selectedActivity) return null;
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(false);
+          setSelectedActivity(null);
+        }}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity 
+                onPress={() => {
+                  setModalVisible(false);
+                  setSelectedActivity(null);
+                }}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Thông tin chi tiết</Text>
+              <View style={styles.closeButton} />
+            </View>
+
+            <ScrollView 
+              style={styles.modalBody} 
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalBodyContent}
+            >
+              {selectedActivity.bannerImageUrl ? (
+                <Image
+                  source={{ uri: selectedActivity.bannerImageUrl }}
+                  style={styles.modalBanner}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.modalBanner, styles.placeholderBanner]}>
+                  <Ionicons name="images" size={48} color="#ccc" />
+                </View>
+              )}
+
+              <View style={styles.modalInfo}>
+                <View style={styles.modalInfoHeader}>
+                  <Text style={styles.modalActivityName}>{selectedActivity.name}</Text>
+                  <View style={styles.modalPoints}>
+                    <Ionicons name="star" size={16} color="#FF9500" />
+                    <Text style={styles.modalPointsText}>{selectedActivity.points || 0} điểm</Text>
+                  </View>
+                </View>
+
+                <View style={styles.modalStatusContainer}>
+                  <View style={[
+                    styles.modalStatusBadge,
+                    { backgroundColor: '#34C759' }
+                  ]}>
+                    <Text style={styles.modalStatusText}>Đang diễn ra</Text>
+                  </View>
+                  <Text style={styles.modalActivityType}>{selectedActivity.activityType}</Text>
+                </View>
+                
+                <View style={styles.modalDescription}>
+                  <Text style={styles.modalDescriptionText}>{selectedActivity.notes || 'Chưa có mô tả'}</Text>
+                </View>
+
+                <View style={styles.modalDetails}>
+                  <View style={styles.modalDetailItem}>
+                    <Ionicons name="location" size={20} color="#007AFF" />
+                    <Text style={styles.modalDetailText}>
+                      <Text style={styles.modalDetailLabel}>Địa điểm: </Text>
+                      {selectedActivity.location || 'Chưa cập nhật'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.modalDetailItem}>
+                    <Ionicons name="calendar" size={20} color="#007AFF" />
+                    <Text style={styles.modalDetailText}>
+                      <Text style={styles.modalDetailLabel}>Bắt đầu: </Text>
+                      {format(selectedActivity.startDate.toDate(), "dd/MM/yyyy HH:mm", { locale: vi })} - {format(selectedActivity.endDate.toDate(), "dd/MM/yyyy HH:mm", { locale: vi })}
+                    </Text>
+                  </View>
+
+                  <View style={styles.modalDetailItem}>
+                    <Ionicons name="calendar" size={20} color="#007AFF" />
+                    <Text style={styles.modalDetailText}>
+                      <Text style={styles.modalDetailLabel}>Kết thúc: </Text>
+                      {format(selectedActivity.endDate.toDate(), "dd/MM/yyyy HH:mm", { locale: vi })}
+                    </Text>
+                  </View>
+
+                  {selectedActivity.organizer && (
+                    <View style={styles.modalDetailItem}>
+                      <Ionicons name="people" size={20} color="#007AFF" />
+                      <Text style={styles.modalDetailText}>
+                        <Text style={styles.modalDetailLabel}>Đơn vị tổ chức: </Text>
+                        {selectedActivity.organizer}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {selectedActivity.requirements && (
+                  <View style={styles.modalRequirements}>
+                    <Text style={styles.modalSectionTitle}>Yêu cầu tham gia</Text>
+                    <Text style={styles.modalRequirementsText}>{selectedActivity.requirements}</Text>
+                  </View>
+                )}
+
+                <View style={styles.modalParticipants}>
+                  <Text style={styles.modalSectionTitle}>Thông tin tham gia</Text>
+                  <Text style={styles.modalParticipantsCount}>
+                    {formatParticipantCount(selectedActivity.participants, selectedActivity.maxParticipants)}
+                  </Text>
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              {renderRegistrationButton(selectedActivity)}
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
+    );
   };
 
   if (initializing || loading) {
@@ -271,7 +412,7 @@ const HDDangDienRa = () => {
             <TouchableOpacity
               key={activity.id}
               style={styles.activityCard}
-              onPress={() => handleActivityPress(activity.id)}
+              onPress={() => handleActivityPress(activity)}
             >
               {activity.bannerImageUrl && (
                 <Image
@@ -308,7 +449,7 @@ const HDDangDienRa = () => {
                   <View style={styles.infoRow}>
                     <Ionicons name="time" size={16} color="#666" />
                     <Text style={styles.infoText}>
-                      {activity.startTime} - {activity.endTime}
+                    {format(activity.startDate.toDate(), "dd/MM/yyyy HH:mm", { locale: vi })} - {format(activity.endDate.toDate(), "dd/MM/yyyy HH:mm", { locale: vi })}
                     </Text>
                   </View>
                 </View>
@@ -319,6 +460,7 @@ const HDDangDienRa = () => {
           ))
         )}
       </ScrollView>
+      {renderActivityModal()}
     </SafeAreaView>
   );
 };
@@ -503,6 +645,165 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalContent: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E9F0',
+    backgroundColor: '#FFFFFF',
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A2138',
+    flex: 1,
+    textAlign: 'center',
+  },
+  modalBody: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalBodyContent: {
+    paddingBottom: 20,
+  },
+  modalBanner: {
+    width: '100%',
+    height: 200,
+  },
+  placeholderBanner: {
+    backgroundColor: '#F0F0F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalInfo: {
+    padding: 16,
+  },
+  modalInfoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  modalActivityName: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1A2138',
+    flex: 1,
+    marginRight: 16,
+  },
+  modalPoints: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF4E5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  modalPointsText: {
+    fontSize: 14,
+    color: '#FF9500',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  modalStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  modalStatusText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  modalActivityType: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  modalDescription: {
+    marginBottom: 16,
+  },
+  modalDescriptionText: {
+    fontSize: 16,
+    color: '#666',
+    lineHeight: 24,
+  },
+  modalDetails: {
+    backgroundColor: '#F8F9FC',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  modalDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalDetailText: {
+    fontSize: 16,
+    color: '#1A2138',
+    marginLeft: 12,
+    flex: 1,
+  },
+  modalDetailLabel: {
+    fontWeight: '500',
+    color: '#666',
+  },
+  modalRequirements: {
+    backgroundColor: '#F8F9FC',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  modalRequirementsText: {
+    fontSize: 14,
+    color: '#1A2138',
+    lineHeight: 20,
+  },
+  modalParticipants: {
+    backgroundColor: '#F8F9FC',
+    borderRadius: 12,
+    padding: 16,
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A2138',
+    marginBottom: 8,
+  },
+  modalParticipantsCount: {
+    fontSize: 15,
+    color: '#666',
+    marginTop: 4,
+  },
+  modalFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E9F0',
+    backgroundColor: '#FFFFFF',
   },
 });
 

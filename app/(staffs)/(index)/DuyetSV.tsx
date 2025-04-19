@@ -1,22 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert, ViewStyle, TextStyle } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert, ViewStyle, TextStyle, Image, ImageStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getFirestore, collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from '@react-native-firebase/firestore';
+import { getStorage, ref as storageRef, getDownloadURL } from '@react-native-firebase/storage';
 import { useRouter } from 'expo-router';
 import { Timestamp } from '@react-native-firebase/firestore';
+import { format } from 'date-fns';
+import { vi } from 'date-fns/locale';
+import { getDatabase, ref, orderByChild, equalTo, get } from '@react-native-firebase/database';
 
-interface Student {
-  id: string;
-  fullname: string;
-  email: string;
+interface StudentInfo {
+  displayName: string;
+  photoURL?: string;
 }
 
 interface Activity {
   id: string;
   name: string;
+  notes?: string;
+  location?: string;
   startDate: Timestamp;
   endDate: Timestamp;
-  pendingParticipants: Student[];
+  activityType?: string;
+  points?: number;
+  pendingParticipants: string[];
+  maxParticipants?: number;
+  participants?: string[];
+}
+
+interface UserData {
+  displayName: string;
+  photoURL?: string;
 }
 
 interface Styles {
@@ -27,13 +41,23 @@ interface Styles {
   refreshButton: ViewStyle;
   listContainer: ViewStyle;
   activityItem: ViewStyle;
+  activityHeader: ViewStyle;
+  activityTypeContainer: ViewStyle;
+  activityType: TextStyle;
+  pointsContainer: ViewStyle;
+  pointsText: TextStyle;
   activityName: TextStyle;
-  activityDate: TextStyle;
-  pendingCount: TextStyle;
+  activityDetails: ViewStyle;
+  detailRow: ViewStyle;
+  detailText: TextStyle;
   studentItem: ViewStyle;
+  studentProfile: ViewStyle;
+  studentAvatar: ImageStyle;
+  avatarPlaceholder: ViewStyle;
   studentInfo: ViewStyle;
   studentName: TextStyle;
-  studentEmail: TextStyle;
+  studentId: TextStyle;
+  studentClass: TextStyle;
   actionButtons: ViewStyle;
   actionButton: ViewStyle;
   approveButton: ViewStyle;
@@ -41,48 +65,108 @@ interface Styles {
   loader: ViewStyle;
   emptyState: ViewStyle;
   emptyStateText: TextStyle;
+  separator: ViewStyle;
+  buttonText: TextStyle;
 }
 
 const DuyetSinhVien = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [studentsInfo, setStudentsInfo] = useState<{[key: string]: StudentInfo}>({});
   const router = useRouter();
   const db = getFirestore();
+  const database = getDatabase();
 
   useEffect(() => {
     fetchActivities();
   }, []);
 
+  const fetchStudentInfo = async (studentId: string) => {
+    try {
+      const userDocRef = doc(db, 'users', studentId);
+      const userDocSnap = await getDoc(userDocRef);
+      const userData = userDocSnap.data() as UserData | undefined;
+      
+      if (userData?.displayName) {
+        let photoURL = userData.photoURL;
+
+        // Nếu không có photoURL trực tiếp, thử lấy từ storage
+        if (!photoURL) {
+          try {
+            const storage = getStorage();
+            const avatarRef = storageRef(storage, `avatars/${studentId}`);
+            photoURL = await getDownloadURL(avatarRef);
+            console.log('Found avatar in storage:', studentId);
+          } catch (error) {
+            console.log('No avatar in storage for:', studentId);
+          }
+        }
+
+        console.log('Found user:', {
+          id: studentId,
+          name: userData.displayName,
+          hasPhoto: !!photoURL
+        });
+        
+        setStudentsInfo(prev => ({
+          ...prev,
+          [studentId]: { 
+            displayName: userData.displayName,
+            photoURL: photoURL
+          }
+        }));
+      } else {
+        console.log('No display name found for user:', studentId);
+      }
+    } catch (error) {
+      console.error('Error fetching user info:', studentId, error);
+    }
+  };
+
   const fetchActivities = async () => {
     setLoading(true);
     try {
-      const activitiesQuery = query(
-        collection(db, 'activities'),
-        where('pendingParticipants', '!=', [])
-      );
-      const activitiesSnapshot = await getDocs(activitiesQuery);
+      // 1. Lấy tất cả hoạt động
+      const activitiesRef = collection(db, 'activities');
+      const activitiesSnapshot = await getDocs(activitiesRef);
+      
+      const activitiesList: Activity[] = [];
+      
+      // 2. Lọc và xử lý từng hoạt động
+      for (const doc of activitiesSnapshot.docs) {
+        const data = doc.data();
+        // Chỉ xử lý hoạt động có pendingParticipants
+        if (data.pendingParticipants && Array.isArray(data.pendingParticipants) && data.pendingParticipants.length > 0) {
+          console.log('Found activity with pending participants:', {
+            id: doc.id,
+            name: data.name,
+            pendingCount: data.pendingParticipants.length,
+            participants: data.pendingParticipants
+          });
+          
+          activitiesList.push({
+            id: doc.id,
+            name: data.name || '',
+            activityType: data.activityType || '',
+            points: data.points || 0,
+            pendingParticipants: data.pendingParticipants,
+            participants: data.participants || [],
+            startDate: data.startDate,
+            endDate: data.endDate,
+            location: data.location,
+            notes: data.notes
+          });
 
-      const activitiesList = await Promise.all(activitiesSnapshot.docs.map(async (activityDoc) => {
-        const activityData = activityDoc.data() as { name: string; startDate: Timestamp; endDate: Timestamp; pendingParticipants: string[] };
-        const pendingParticipants = await Promise.all(activityData.pendingParticipants.map(async (userId: string) => {
-          const userDoc = await getDoc(doc(db, 'users', userId));
-          const userData = userDoc.data() as { fullname: string; email: string };
-          return {
-            id: userId,
-            fullname: userData?.fullname || '',
-            email: userData?.email || ''
-          } as Student;
-        }));
-        return { 
-          id: activityDoc.id,
-          name: activityData.name || '',
-          startDate: activityData.startDate,
-          endDate: activityData.endDate,
-          pendingParticipants 
-        } as Activity;
-      }));
+          // 3. Lấy thông tin của từng sinh viên
+          for (const studentId of data.pendingParticipants) {
+            await fetchStudentInfo(studentId);
+          }
+        }
+      }
 
+      console.log('Total activities with pending students:', activitiesList.length);
       setActivities(activitiesList);
+
     } catch (error) {
       console.error('Error fetching activities:', error);
       Alert.alert('Lỗi', 'Không thể tải danh sách hoạt động. Vui lòng thử lại sau.');
@@ -93,11 +177,29 @@ const DuyetSinhVien = () => {
 
   const handleApprove = async (activityId: string, userId: string) => {
     try {
-      await updateDoc(doc(db, 'activities', activityId), {
-        participants: arrayUnion(userId),
-        pendingParticipants: arrayRemove(userId),
+      const activityRef = doc(db, 'activities', activityId);
+      
+      const activityDoc = await getDoc(activityRef);
+      if (!activityDoc.exists) {
+        throw new Error('Hoạt động không tồn tại');
+      }
+
+      const activityData = activityDoc.data();
+      if (!activityData) {
+        throw new Error('Dữ liệu hoạt động không tồn tại');
+      }
+
+      const updatedPendingParticipants = (activityData.pendingParticipants || []).filter(
+        (id: string) => id !== userId
+      );
+      const updatedParticipants = [...(activityData.participants || []), userId];
+
+      await updateDoc(activityRef, {
+        pendingParticipants: updatedPendingParticipants,
+        participants: updatedParticipants,
       });
-      fetchActivities(); // Refresh the list
+
+      await fetchActivities();
       Alert.alert('Thành công', 'Đã phê duyệt sinh viên tham gia hoạt động.');
     } catch (error) {
       console.error('Error approving student:', error);
@@ -107,10 +209,27 @@ const DuyetSinhVien = () => {
 
   const handleReject = async (activityId: string, userId: string) => {
     try {
-      await updateDoc(doc(db, 'activities', activityId), {
-        pendingParticipants: arrayRemove(userId),
+      const activityRef = doc(db, 'activities', activityId);
+      
+      const activityDoc = await getDoc(activityRef);
+      if (!activityDoc.exists) {
+        throw new Error('Hoạt động không tồn tại');
+      }
+
+      const activityData = activityDoc.data();
+      if (!activityData) {
+        throw new Error('Dữ liệu hoạt động không tồn tại');
+      }
+
+      const updatedPendingParticipants = (activityData.pendingParticipants || []).filter(
+        (id: string) => id !== userId
+      );
+
+      await updateDoc(activityRef, {
+        pendingParticipants: updatedPendingParticipants,
       });
-      fetchActivities(); // Refresh the list
+
+      await fetchActivities();
       Alert.alert('Thành công', 'Đã từ chối sinh viên tham gia hoạt động.');
     } catch (error) {
       console.error('Error rejecting student:', error);
@@ -119,45 +238,74 @@ const DuyetSinhVien = () => {
   };
 
   const renderActivityItem = ({ item }: { item: Activity }) => {
-    const formatDate = (date: Timestamp | undefined) => {
-      if (date && typeof date.toDate === 'function') {
-        return date.toDate().toLocaleDateString();
-      }
-      return 'Chưa xác định';
-    };
-
     return (
       <View style={styles.activityItem}>
-        <Text style={styles.activityName}>{item.name || 'Hoạt động không tên'}</Text>
-        <Text style={styles.activityDate}>
-          {formatDate(item.startDate)} - {formatDate(item.endDate)}
-        </Text>
-        <Text style={styles.pendingCount}>Sinh viên chờ duyệt: {item.pendingParticipants.length}</Text>
+        <View style={styles.activityHeader}>
+          <View style={styles.activityTypeContainer}>
+            <Text style={styles.activityType}>
+              {item.activityType === 'softskill' ? 'Kỹ năng mềm' : item.activityType || 'Hoạt động'}
+            </Text>
+            {(item.points ?? 0) > 0 && (
+              <View style={styles.pointsContainer}>
+                <Text style={styles.pointsText}>{item.points} điểm</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.activityName}>{item.name}</Text>
+        </View>
+
+        <View style={styles.activityDetails}>
+          <View style={styles.detailRow}>
+            <Ionicons name="people" size={16} color="#666" />
+            <Text style={styles.detailText}>
+              Chờ duyệt: {item.pendingParticipants.length}
+            </Text>
+          </View>
+        </View>
+
         <FlatList
           data={item.pendingParticipants}
-          keyExtractor={(student) => student.id}
-          renderItem={({ item: student }) => (
-            <View style={styles.studentItem}>
-              <View style={styles.studentInfo}>
-                <Text style={styles.studentName}>{student.fullname || 'Chưa có tên'}</Text>
-                <Text style={styles.studentEmail}>{student.email || 'Chưa có email'}</Text>
+          keyExtractor={(studentId) => studentId}
+          renderItem={({ item: studentId }) => {
+            const studentInfo = studentsInfo[studentId];
+
+            return (
+              <View style={styles.studentItem}>
+                <View style={styles.studentProfile}>
+                  {studentInfo?.photoURL ? (
+                    <Image
+                      source={{ uri: studentInfo.photoURL }}
+                      style={styles.studentAvatar}
+                    />
+                  ) : (
+                    <View style={styles.avatarPlaceholder}>
+                      <Ionicons name="person" size={24} color="#CCC" />
+                    </View>
+                  )}
+                  <View style={styles.studentInfo}>
+                    <Text style={styles.studentName}>
+                      {studentInfo ? studentInfo.displayName : 'Đang tải...'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.approveButton]}
+                    onPress={() => handleApprove(item.id, studentId)}
+                  >
+                    <Text style={styles.buttonText}>Duyệt</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.rejectButton]}
+                    onPress={() => handleReject(item.id, studentId)}
+                  >
+                    <Text style={styles.buttonText}>Từ chối</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              <View style={styles.actionButtons}>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.approveButton]}
-                  onPress={() => handleApprove(item.id, student.id)}
-                >
-                  <Ionicons name="checkmark-outline" size={20} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.rejectButton]}
-                  onPress={() => handleReject(item.id, student.id)}
-                >
-                  <Ionicons name="close-outline" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+            );
+          }}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       </View>
     );
@@ -224,58 +372,113 @@ const styles = StyleSheet.create<Styles>({
   activityItem: {
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 12,
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 1,
     },
-    shadowOpacity: 0.23,
-    shadowRadius: 2.62,
-    elevation: 4,
+    shadowOpacity: 0.18,
+    shadowRadius: 1.0,
+    elevation: 1,
+  },
+  activityHeader: {
+    marginBottom: 8,
+  },
+  activityTypeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  activityType: {
+    fontSize: 13,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  pointsContainer: {
+    backgroundColor: '#FFF4E5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  pointsText: {
+    fontSize: 13,
+    color: '#FF9500',
+    fontWeight: '500',
   },
   activityName: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#333333',
+  },
+  activityDetails: {
+    backgroundColor: '#F8F9FC',
+    borderRadius: 6,
+    padding: 8,
     marginBottom: 8,
   },
-  activityDate: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 8,
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  pendingCount: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginBottom: 16,
+  detailText: {
+    fontSize: 13,
+    color: '#666',
+    marginLeft: 8,
   },
   studentItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
   },
+  studentProfile: {
+    flexDirection: 'row',
+    flex: 1,
+    alignItems: 'center',
+  },
+  studentAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  } as ImageStyle,
+  avatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: '#F0F0F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  } as ViewStyle,
   studentInfo: {
     flex: 1,
   },
   studentName: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#333333',
+    fontWeight: '600',
+    color: '#1A2138',
+    marginBottom: 4,
   },
-  studentEmail: {
+  studentId: {
     fontSize: 14,
-    color: '#666666',
+    color: '#666',
+    marginBottom: 2,
+  },
+  studentClass: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
   },
   actionButtons: {
     flexDirection: 'row',
   },
   actionButton: {
-    padding: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 4,
     marginLeft: 8,
   },
@@ -299,6 +502,16 @@ const styles = StyleSheet.create<Styles>({
     fontSize: 16,
     color: '#666666',
     marginTop: 16,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#E5E9F0',
+    marginVertical: 12,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });
 
