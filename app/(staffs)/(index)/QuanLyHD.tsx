@@ -188,7 +188,7 @@ const QuanLyHoatDong = () => {
         
         <View style={styles.infoRow}>
           <Ionicons name="time-outline" size={16} color="#666" />
-          <Text style={styles.infoText}>{formatDate(item.startDate)}</Text>
+          <Text style={styles.infoText}>{formatDate(item.startDate)} - {formatDate(item.endDate)}</Text>
         </View>
 
         <View style={styles.statusContainer}>

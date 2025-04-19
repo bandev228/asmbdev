@@ -1,21 +1,5 @@
-"use client"
-
 import { useState, useCallback } from "react"
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  SafeAreaView, 
-  ActivityIndicator, 
-  Alert,
-  Dimensions,
-  RefreshControl,
-  Platform,
-  StatusBar,
-  FlatList,
-} from "react-native"
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, ActivityIndicator, Alert, Dimensions, RefreshControl, Platform, StatusBar, FlatList } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { getAuth } from "@react-native-firebase/auth"
 import { useRouter } from "expo-router"
@@ -250,7 +234,7 @@ const ManagerScreen = () => {
           </View>
           <View style={styles.quickActionButtons}>
             <NavigationButton
-              title="Tạo hoạt động" 
+              title="Tạo hoạt động mới" 
               icon="add-circle-outline" 
               onPress={() => router.push("./StaffTaoHD")}
               color="#3949AB"
@@ -341,39 +325,15 @@ const ManagerScreen = () => {
             />
             <NavigationButton
               title="Hoạt động kết thúc"
-              icon="pencil-outline"
+              icon="stop-circle"
               onPress={() => router.push("./KetThucHD")}
-              color="#3949AB"
+              color="#000033"
               delay={100}
               route="./KetThucHD"
             />
             <NavigationButton
-              title="Thống kê"
-              icon="bar-chart-outline" 
-              onPress={() => router.push("./ThongKeHD")}
-              color="#FB8C00"
-              delay={150}
-              route="./ThongKeHD"
-            />
-            <NavigationButton
-              title="Quản lý sinh viên" 
-              icon="people-outline" 
-              onPress={() => router.push("./QuanLySV")}
-              color="#43A047"
-              delay={200}
-              route="./QuanLySV"
-            />
-            <NavigationButton
-              title="Báo cáo" 
-              icon="document-text-outline" 
-              onPress={() => router.push("./BaoCaoHD")}
-              color="#8E24AA"
-              delay={250}
-              route="./BaoCaoHD"
-            />
-            <NavigationButton
               title="Duyệt hoạt động" 
-              icon="checkmark-circle-outline" 
+              icon="bag-add" 
               onPress={() => router.push("./DuyetHD")}
               color="#E53935"
               delay={300}
@@ -388,6 +348,14 @@ const ManagerScreen = () => {
               route="./DuyetSV"
             />
             <NavigationButton
+              title="Quản lý sinh viên" 
+              icon="people-outline" 
+              onPress={() => router.push("./QuanLySV")}
+              color="#43A047"
+              delay={200}
+              route="./QuanLySV"
+            />
+            <NavigationButton
               title="Quản lý thông báo" 
               icon="notifications-outline" 
               onPress={() => router.push("./QuanLyTB")}
@@ -396,12 +364,36 @@ const ManagerScreen = () => {
               route="./QuanLyTB"
             />
             <NavigationButton
+              title="Tạo Báo cáo" 
+              icon="document-text-outline" 
+              onPress={() => router.push("./BaoCaoHD")}
+              color="#8E24AA"
+              delay={250}
+              route="./BaoCaoHD"
+            />
+            <NavigationButton
+              title="Tạo Thống kê"
+              icon="bar-chart-outline" 
+              onPress={() => router.push("./ThongKeHD")}
+              color="#FF0066"
+              delay={150}
+              route="./ThongKeHD"
+            />
+            <NavigationButton
               title="Gửi tài liệu"
               icon="send"
               onPress={() => router.push("./QuanLyTB")}
               color="#6D4C41"
               delay={400}
               route="./GuiTLSH"
+            />
+            <NavigationButton
+              title="Phản Hồi"
+              icon="balloon-outline"
+              onPress={() => router.push("./TiepNhanPH")}
+              color="#FF6600"
+              delay={400}
+              route="./TiepNhanPH"
             />
             <NavigationButton
               title="Cài đặt" 

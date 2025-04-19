@@ -76,6 +76,7 @@ export default function IndexLayout() {
       options={{
         headerShown: false,
         presentation: "card",
+        
       }}
       />
       <Stack.Screen
