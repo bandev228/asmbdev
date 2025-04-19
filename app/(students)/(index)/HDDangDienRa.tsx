@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getFirestore, collection, query, where, getDocs, doc, updateDoc, arrayUnion, Timestamp, getDoc } from '@react-native-firebase/firestore';
-import { useAuth } from '../../(staffs)/(index)/AuthContext';
+import { useAuth } from '@/app/_layout';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 
@@ -31,19 +31,37 @@ interface Activity {
   bannerImageUrl: string;
   participants: string[];
   pendingParticipants: string[];
+  isAttendanceEnabled?: boolean;
 }
 
 const HDDangDienRa = () => {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, initializing } = useAuth();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('Current user:', user); // Debug log
+    if (initializing) {
+      return;
+    }
+
+    if (!user) {
+      Alert.alert(
+        "Thông báo",
+        "Vui lòng đăng nhập để xem hoạt động",
+        [
+          {
+            text: "OK",
+            onPress: () => router.push("/(auth)/login")
+          }
+        ]
+      );
+      return;
+    }
+
     fetchActivities();
-  }, [user]); // Add user to dependency array
+  }, [user, initializing]);
 
   const fetchActivities = async () => {
     try {
@@ -126,14 +144,46 @@ const HDDangDienRa = () => {
     return null;
   };
 
+  const handleAttendance = (activity: Activity) => {
+    if (!user) {
+      Alert.alert("Thông báo", "Vui lòng đăng nhập để điểm danh");
+      return;
+    }
+
+    if (!activity.participants?.includes(user.uid)) {
+      Alert.alert(
+        "Thông báo", 
+        "Bạn chưa được duyệt tham gia hoạt động này. Vui lòng đăng ký và chờ duyệt."
+      );
+      return;
+    }
+
+    router.push({
+      pathname: "/DiemDanhHD",
+      params: { 
+        activityId: activity.id,
+        activityName: activity.name
+      }
+    });
+  };
+
   const renderRegistrationButton = (activity: Activity) => {
     const status = getRegistrationStatus(activity);
     
     if (status === 'approved') {
       return (
-        <View style={[styles.statusBadge, styles.approvedBadge]}>
-          <Ionicons name="checkmark-circle" size={16} color="#fff" />
-          <Text style={styles.statusText}>Đã được duyệt</Text>
+        <View style={styles.buttonContainer}>
+          <View style={[styles.statusBadge, styles.approvedBadge]}>
+            <Ionicons name="checkmark-circle" size={16} color="#fff" />
+            <Text style={styles.statusText}>Đã được duyệt</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.attendanceButton}
+            onPress={() => handleAttendance(activity)}
+          >
+            <Ionicons name="qr-code" size={20} color="#fff" />
+            <Text style={styles.attendanceButtonText}>Điểm danh</Text>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -172,11 +222,29 @@ const HDDangDienRa = () => {
     });
   };
 
-  if (loading) {
+  if (initializing || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Đang tải...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.emptyContainer}>
+          <Ionicons name="alert-circle" size={48} color="#FF3B30" />
+          <Text style={styles.emptyText}>Vui lòng đăng nhập để xem hoạt động</Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push("/(auth)/login")}
+          >
+            <Text style={styles.loginButtonText}>Đăng nhập</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -377,24 +445,64 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  attendanceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  attendanceButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
+    padding: 8,
     borderRadius: 8,
+    flex: 1,
+  },
+  approvedBadge: {
+    backgroundColor: '#007AFF',
   },
   pendingBadge: {
     backgroundColor: '#FF9500',
-  },
-  approvedBadge: {
-    backgroundColor: '#34C759',
   },
   statusText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
+  loginButton: {
+    marginTop: 16,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

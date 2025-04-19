@@ -20,7 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { getFirestore, collection, query, orderBy, getDocs, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, deleteField } from '@react-native-firebase/firestore';
+import { getFirestore, collection, query, orderBy, getDocs, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, deleteField, getDoc } from '@react-native-firebase/firestore';
 import { getAuth } from '@react-native-firebase/auth';
 import { useRouter } from 'expo-router';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -37,7 +37,7 @@ type RootStackParamList = {
   // Add other screen params as needed
 }
 
-type NotificationType = 'activity' | 'approval' | 'announcement' | 'system'
+type NotificationType = 'activity' | 'system';
 
 interface Notification {
   id: string;
@@ -46,9 +46,13 @@ interface Notification {
   createdAt: Timestamp;
   read: boolean;
   type: NotificationType;
-  relatedId?: string;
   activityId?: string;
   isRead?: boolean;
+  senderId?: string;
+  senderName?: string;
+  senderRole?: string;
+  userId?: string;
+  activityStartDate?: Timestamp;
 }
 
 interface QuanLyThongBaoProps {
@@ -135,7 +139,11 @@ const QuanLyThongBao: React.FC<QuanLyThongBaoProps> = ({ navigation }) => {
             read: data.read || false,
             type: data.type || 'announcement',
             activityId: data.activityId,
-            isRead: data.read || false
+            isRead: data.read || false,
+            senderId: data.senderId,
+            senderName: data.senderName,
+            senderRole: data.senderRole,
+            userId: data.userId
           };
         });
         
@@ -172,28 +180,62 @@ const QuanLyThongBao: React.FC<QuanLyThongBaoProps> = ({ navigation }) => {
         return;
       }
       
-      const newNotification = {
+      // Lấy thông tin người gửi
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      const userData = userDoc.data();
+      
+      // Tạo đối tượng thông báo với các giá trị mặc định
+      const newNotification: Record<string, any> = {
         title: title.trim(),
         message: message.trim(),
         createdAt: serverTimestamp(),
         read: false,
-        type: (notificationType === 'activity' ? 'activity' : 'announcement') as NotificationType,
-        activityId: notificationType === 'activity' ? activityId.trim() : undefined
+        type: notificationType === 'activity' ? 'activity' : 'system',
+        senderId: user.uid,
+        senderName: userData?.displayName || 'Staff',
+        senderRole: 'staff',
+        userId: 'all'
       };
-      
+
+      // Chỉ thêm activityId nếu là thông báo hoạt động và có ID
+      if (notificationType === 'activity' && activityId?.trim()) {
+        newNotification.activityId = activityId.trim();
+        
+        // Lấy thông tin hoạt động nếu có
+        const activityDoc = await getDoc(doc(db, 'activities', activityId.trim()));
+        if (activityDoc.exists) {
+          const activityData = activityDoc.data();
+          if (activityData?.startDate) {
+            newNotification.activityStartDate = activityData.startDate;
+          }
+        }
+      }
+
+      // Thêm thông báo vào collection notifications
       const docRef = await addDoc(collection(db, 'notifications'), newNotification);
       console.log("Notification created with ID:", docRef.id);
 
+      // Cập nhật UI
       const createdNotification: Notification = {
         id: docRef.id,
-        ...newNotification,
+        title: newNotification.title,
+        message: newNotification.message,
         createdAt: Timestamp.fromDate(new Date()),
+        read: false,
+        type: newNotification.type as NotificationType,
+        activityId: newNotification.activityId,
+        senderId: newNotification.senderId,
+        senderName: newNotification.senderName,
+        senderRole: newNotification.senderRole,
+        userId: newNotification.userId,
+        activityStartDate: newNotification.activityStartDate,
         isRead: false
       };
       
       setNotifications(prev => [createdNotification, ...prev]);
       setFilteredNotifications(prev => [createdNotification, ...prev]);
 
+      // Reset form
       setTitle('');
       setMessage('');
       setActivityId('');
@@ -328,43 +370,87 @@ const QuanLyThongBao: React.FC<QuanLyThongBaoProps> = ({ navigation }) => {
     }
   };
 
-  const getNotificationIcon = (notification: Notification): string => {
-    if (notification.activityId) {
-      return '📝';
-    } else if (notification.type === 'approval') {
-      return '✅';
-    } else if (notification.type === 'announcement') {
-      return '📢';
-    } else {
-      return '🔔';
+  const getNotificationIcon = (notification: Notification): keyof typeof Ionicons.glyphMap => {
+    if (notification.type === 'activity') {
+      return 'calendar-outline';
     }
+    return 'notifications-outline';
   };
 
-  const renderNotificationItem = ({ item }: { item: Notification }) => (
-    <View style={styles.notificationItem}>
-      <View style={styles.notificationContent}>
-        <Text style={styles.notificationTitle}>{item.title}</Text>
-        <Text style={styles.notificationMessage}>{item.message}</Text>
-        <Text style={styles.notificationTime}>
-          {formatTimestamp(item.createdAt)}
-        </Text>
+  const handleNotificationPress = (notification: Notification) => {
+    Alert.alert(
+      notification.title,
+      notification.message,
+      [
+        { text: 'Đóng', style: 'cancel' },
+        { text: 'Chỉnh sửa', onPress: () => openEditModal(notification.id, notification) }
+      ]
+    );
+  };
+
+  const renderNotificationItem = ({ item }: { item: Notification }) => {
+    const MAX_CONTENT_LENGTH = 100;
+    const isContentLong = item.message.length > MAX_CONTENT_LENGTH;
+    const truncatedContent = isContentLong 
+      ? item.message.substring(0, MAX_CONTENT_LENGTH) + '...' 
+      : item.message;
+
+    return (
+      <View style={styles.notificationItem}>
+        <View style={styles.notificationContent}>
+          <View style={styles.notificationHeader}>
+            <View style={styles.iconContainer}>
+              <Ionicons 
+                name={getNotificationIcon(item)}
+                size={screenWidth * 0.05} 
+                color={item.type === 'activity' ? "#4CAF50" : "#007AFF"} 
+              />
+            </View>
+            <View style={styles.titleContainer}>
+              <Text style={styles.notificationTitle}>{item.title}</Text>
+              <Text style={styles.notificationTime}>
+                {formatTimestamp(item.createdAt)}
+              </Text>
+            </View>
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                onPress={() => openEditModal(item.id, item)}
+                style={styles.actionButton}
+              >
+                <Ionicons name="create" size={screenWidth * 0.05} color="#666" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleDeleteNotification(item)}
+                style={styles.actionButton}
+              >
+                <Ionicons name="trash" size={screenWidth * 0.05} color="#666" />
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          <View style={styles.messageContainer}>
+            <Text style={styles.notificationMessage}>{truncatedContent}</Text>
+            {isContentLong && (
+              <TouchableOpacity 
+                style={styles.viewMoreButton}
+                onPress={() => handleNotificationPress(item)}
+              >
+                <Text style={styles.viewMoreText}>Xem thêm</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.footerContainer}>
+            {item.senderName && (
+              <Text style={styles.senderText}>
+                Người gửi: {item.senderName}
+              </Text>
+            )}
+          </View>
+        </View>
       </View>
-      <View style={styles.notificationActions}>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => openEditModal(item.id, item)}
-        >
-          <Text style={styles.buttonText}>Sửa</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDeleteNotification(item)}
-        >
-          <Text style={styles.buttonText}>Xóa</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   const renderDebugInfo = () => {
     if (__DEV__) {
@@ -616,121 +702,6 @@ const QuanLyThongBao: React.FC<QuanLyThongBaoProps> = ({ navigation }) => {
             </View>
           </KeyboardAvoidingView>
         </Modal>
-        
-        {/* Modal chỉnh sửa thông báo */}
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={editModalVisible}
-          onRequestClose={() => setEditModalVisible(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={styles.modalContainer}
-          >
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Chỉnh sửa thông báo</Text>
-                <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                  <Ionicons name="close" size={screenWidth * 0.06} color="#333" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalBody}>
-                <Text style={styles.inputLabel}>Loại thông báo</Text>
-                <View style={styles.typeSelector}>
-                  <TouchableOpacity 
-                    style={[
-                      styles.typeOption, 
-                      notificationType === 'general' && styles.selectedType,
-                      notificationType === 'general' && { backgroundColor: '#FF9800' }
-                    ]}
-                    onPress={() => setNotificationType('general')}
-                  >
-                    <Ionicons 
-                      name="megaphone-outline" 
-                      size={screenWidth * 0.05} 
-                      color={notificationType === 'general' ? '#FFF' : '#FF9800'} 
-                    />
-                    <Text style={[
-                      styles.typeOptionText,
-                      notificationType === 'general' && styles.selectedTypeText
-                    ]}>Thông báo chung</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[
-                      styles.typeOption, 
-                      notificationType === 'activity' && styles.selectedType,
-                      notificationType === 'activity' && { backgroundColor: '#4CAF50' }
-                    ]}
-                    onPress={() => setNotificationType('activity')}
-                  >
-                    <Ionicons 
-                      name="calendar-outline" 
-                      size={screenWidth * 0.05} 
-                      color={notificationType === 'activity' ? '#FFF' : '#4CAF50'} 
-                    />
-                    <Text style={[
-                      styles.typeOptionText,
-                      notificationType === 'activity' && styles.selectedTypeText
-                    ]}>Thông báo hoạt động</Text>
-                  </TouchableOpacity>
-                </View>
-                
-                <Text style={styles.inputLabel}>Tiêu đề</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Nhập tiêu đề thông báo"
-                  value={title}
-                  onChangeText={setTitle}
-                />
-                
-                <Text style={styles.inputLabel}>Nội dung</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  placeholder="Nhập nội dung thông báo"
-                  value={message}
-                  onChangeText={setMessage}
-                  multiline
-                  textAlignVertical="top"
-                />
-                
-                {notificationType === 'activity' && (
-                  <>
-                    <Text style={styles.inputLabel}>ID Hoạt động</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Nhập ID hoạt động"
-                      value={activityId}
-                      onChangeText={setActivityId}
-                    />
-                  </>
-                )}
-              </ScrollView>
-              
-              <View style={styles.modalFooter}>
-                <TouchableOpacity 
-                  style={styles.cancelButton}
-                  onPress={() => setEditModalVisible(false)}
-                >
-                  <Text style={styles.cancelButtonText}>Hủy</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.sendButton}
-                  onPress={handleEditNotification}
-                  disabled={isEditing}
-                >
-                  {isEditing ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : (
-                    <Text style={styles.sendButtonText}>Cập nhật</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -743,56 +714,34 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F5',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: screenWidth * 0.04,
-    paddingVertical: screenWidth * 0.03,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    padding: screenWidth * 0.04,
   },
   backButton: {
     padding: screenWidth * 0.02,
-    marginRight: screenWidth * 0.02,
   },
   headerTitle: {
-    fontSize: screenWidth * 0.055,
-    fontWeight: 'bold',
-    color: '#333333',
     flex: 1,
-    textAlign: 'center',
+    fontSize: screenWidth * 0.05,
+    fontWeight: 'bold',
   },
   addButton: {
     padding: screenWidth * 0.02,
-    marginLeft: screenWidth * 0.02,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    margin: screenWidth * 0.04,
-    paddingHorizontal: screenWidth * 0.03,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+    padding: screenWidth * 0.04,
   },
   searchIcon: {
-    marginRight: screenWidth * 0.02,
+    paddingRight: screenWidth * 0.02,
   },
   searchInput: {
     flex: 1,
-    height: screenHeight * 0.05,
-    fontSize: screenWidth * 0.04,
-    color: '#333',
+    padding: screenWidth * 0.02,
   },
   loadingContainer: {
     flex: 1,
@@ -800,13 +749,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  listContent: {
-    padding: screenWidth * 0.04,
-    paddingBottom: screenHeight * 0.1,
+    fontSize: screenWidth * 0.04,
+    fontWeight: 'bold',
+    marginTop: screenHeight * 0.02,
   },
   notificationItem: {
     backgroundColor: '#FFFFFF',
@@ -823,87 +768,79 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   notificationContent: {
-    flexDirection: 'column',
+    flex: 1,
+  },
+  notificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: screenHeight * 0.01,
+  },
+  iconContainer: {
+    width: screenWidth * 0.1,
+    height: screenWidth * 0.1,
+    borderRadius: screenWidth * 0.05,
+    backgroundColor: '#F0F7FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: screenWidth * 0.02,
+  },
+  titleContainer: {
+    flex: 1,
   },
   notificationTitle: {
     fontSize: screenWidth * 0.045,
     fontWeight: '600',
     color: '#333333',
+  },
+  notificationTime: {
+    fontSize: screenWidth * 0.035,
+    color: '#999999',
+    marginTop: screenHeight * 0.005,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#007AFF',
+    marginLeft: screenWidth * 0.02,
+  },
+  messageContainer: {
     marginBottom: screenHeight * 0.01,
   },
   notificationMessage: {
     fontSize: screenWidth * 0.04,
     color: '#666666',
-    marginBottom: screenHeight * 0.01,
     lineHeight: screenWidth * 0.055,
   },
-  notificationTime: {
-    fontSize: screenWidth * 0.035,
-    color: '#999999',
+  viewMoreButton: {
+    marginTop: screenHeight * 0.005,
   },
-  notificationActions: {
+  viewMoreText: {
+    color: '#007AFF',
+    fontSize: screenWidth * 0.035,
+    fontWeight: '500',
+  },
+  footerContainer: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  notificationDate: {
-    fontSize: screenWidth * 0.035,
-    color: '#999999',
-  },
-  activityIdContainer: {
     marginTop: screenHeight * 0.01,
     paddingTop: screenHeight * 0.01,
     borderTopWidth: 1,
     borderTopColor: '#F0F0F0',
   },
-  activityIdText: {
+  senderText: {
     fontSize: screenWidth * 0.035,
-    color: '#666',
+    color: '#666666',
     fontStyle: 'italic',
   },
   actionButtons: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
   actionButton: {
     padding: screenWidth * 0.02,
-    borderRadius: 5,
     marginLeft: screenWidth * 0.02,
-  },
-  editButton: {
-    backgroundColor: '#E3F2FD',
-  },
-  deleteButton: {
-    backgroundColor: '#FFEBEE',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: screenHeight * 0.1,
-  },
-  emptyTitle: {
-    fontSize: screenWidth * 0.05,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: screenHeight * 0.02,
-    marginBottom: screenHeight * 0.01,
-  },
-  emptyText: {
-    fontSize: screenWidth * 0.04,
-    color: '#666666',
-    marginBottom: screenHeight * 0.03,
-    textAlign: 'center',
-  },
-  createButton: {
-    paddingVertical: screenHeight * 0.015,
-    paddingHorizontal: screenWidth * 0.08,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-  },
-  createButtonText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: screenWidth * 0.04,
   },
   modalContainer: {
     flex: 1,
@@ -939,19 +876,6 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: screenHeight * 0.01,
   },
-  input: {
-    backgroundColor: '#F5F7FA',
-    borderRadius: 8,
-    padding: screenWidth * 0.04,
-    fontSize: screenWidth * 0.04,
-    marginBottom: screenHeight * 0.02,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  textArea: {
-    height: screenHeight * 0.15,
-    textAlignVertical: 'top',
-  },
   typeSelector: {
     flexDirection: 'row',
     marginBottom: screenHeight * 0.02,
@@ -977,6 +901,19 @@ const styles = StyleSheet.create({
   selectedTypeText: {
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  input: {
+    backgroundColor: '#F5F7FA',
+    borderRadius: 8,
+    padding: screenWidth * 0.04,
+    fontSize: screenWidth * 0.04,
+    marginBottom: screenHeight * 0.02,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  textArea: {
+    height: screenHeight * 0.15,
+    textAlignVertical: 'top',
   },
   modalFooter: {
     flexDirection: 'row',
@@ -1012,24 +949,45 @@ const styles = StyleSheet.create({
     fontSize: screenWidth * 0.04,
   },
   debugContainer: {
-    backgroundColor: '#FFECB3',
-    padding: 10,
-    margin: 10,
-    borderRadius: 5,
+    padding: screenWidth * 0.04,
   },
   debugText: {
-    fontSize: 12,
-    color: '#333',
+    fontSize: screenWidth * 0.04,
+    marginBottom: screenHeight * 0.02,
   },
   errorText: {
-    fontSize: 12,
     color: 'red',
+    fontSize: screenWidth * 0.04,
+    marginTop: screenHeight * 0.02,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    fontSize: screenWidth * 0.05,
+    fontWeight: 'bold',
+    marginBottom: screenHeight * 0.02,
+  },
+  emptyText: {
+    fontSize: screenWidth * 0.04,
+    color: '#666',
+    marginBottom: screenHeight * 0.02,
+  },
+  createButton: {
+    padding: screenWidth * 0.02,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderRadius: screenWidth * 0.01,
+  },
+  createButtonText: {
+    fontSize: screenWidth * 0.04,
     fontWeight: 'bold',
   },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
+  listContent: {
+    padding: screenWidth * 0.04,
+    paddingBottom: screenHeight * 0.1,
   },
 });
 

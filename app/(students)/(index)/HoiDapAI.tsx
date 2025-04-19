@@ -22,6 +22,7 @@ import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, getDocs, 
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { useAIContext } from './hooks/useAIContext';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
@@ -55,15 +56,18 @@ const HoiDapAI = () => {
   const auth = getAuth();
   const db = getFirestore();
 
-  // Khởi tạo Gemini API với cấu hình tối ưu
+  // Sử dụng hook useAIContext
+  const { generatePrompt, config } = useAIContext();
+
+  // Khởi tạo Gemini API với cấu hình từ hook
   const genAI = new GoogleGenerativeAI('AIzaSyBTYV6dmJzpxINv80vnXQcC8mQXDNTWQ7Y');
   const model = genAI.getGenerativeModel({ 
     model: "gemini-2.0-flash",
     generationConfig: {
-      temperature: 0.9,
-      topK: 1,
-      topP: 0.8,
-      maxOutputTokens: 2048,
+      temperature: config.temperature,
+      topK: config.topK,
+      topP: config.topP,
+      maxOutputTokens: config.maxTokens,
     },
     safetySettings: [
       {
@@ -88,11 +92,11 @@ const HoiDapAI = () => {
   useEffect(() => {
     const userId = auth.currentUser?.uid;
     if (!userId) {
-      console.log("No user ID found");
+      // console.log("No user ID found");
       return;
     }
 
-    console.log("Loading chat sessions for user:", userId);
+    // console.log("Loading chat sessions for user:", userId);
     setIsLoadingHistory(true);
     setHistoryError(null);
 
@@ -104,7 +108,7 @@ const HoiDapAI = () => {
 
     const unsubscribeSessions = onSnapshot(sessionsQuery, 
       (snapshot) => {
-        console.log("Chat sessions snapshot:", snapshot.docs.length);
+        // console.log("Chat sessions snapshot:", snapshot.docs.length);
         
         const sessions = snapshot.docs.map(doc => {
           const data = doc.data();
@@ -177,22 +181,22 @@ const HoiDapAI = () => {
     try {
       const userId = auth.currentUser?.uid;
       if (!userId) {
-        console.log("No user ID found when loading chat session");
+        // console.log("No user ID found when loading chat session");
         return;
       }
 
-      console.log("Loading chat session:", sessionId);
+      // console.log("Loading chat session:", sessionId);
       const messagesQuery = query(
         collection(db, `users/${userId}/chat_sessions/${sessionId}/messages`),
         orderBy('timestamp', 'asc')
       );
 
       const messagesSnapshot = await getDocs(messagesQuery);
-      console.log("Messages loaded:", messagesSnapshot.docs.length);
+      // console.log("Messages loaded:", messagesSnapshot.docs.length);
       
       const loadedMessages = messagesSnapshot.docs.map(doc => {
         const data = doc.data();
-        console.log("Message data:", data);
+        // console.log("Message data:", data);
         return {
           id: doc.id,
           ...data,
@@ -231,29 +235,24 @@ const HoiDapAI = () => {
 
       let sessionId = currentSessionId;
       if (!sessionId) {
-        console.log("Creating new chat session");
-        // Tạo session mới
         const sessionData = {
           title: inputText.substring(0, 30) + (inputText.length > 30 ? '...' : ''),
           lastMessage: inputText,
           timestamp: new Date(),
-          userId: userId // Thêm userId vào session data
+          userId: userId
         };
         
         const sessionRef = await addDoc(collection(db, `users/${userId}/chat_sessions`), sessionData);
         sessionId = sessionRef.id;
-        console.log("New session created with ID:", sessionId);
         setCurrentSessionId(sessionId);
       }
 
-      // Lưu tin nhắn người dùng
-      console.log("Saving user message to session:", sessionId);
       await addDoc(collection(db, `users/${userId}/chat_sessions/${sessionId}/messages`), userMessage);
 
-      // Gọi API Gemini
-      const prompt = `Bạn là một trợ lý AI thân thiện và hữu ích. Hãy trả lời câu hỏi sau một cách tự nhiên và chi tiết: ${inputText}`;
+      // Sử dụng generatePrompt từ hook
+      const contextualPrompt = generatePrompt(inputText);
       
-      const result = await model.generateContent(prompt);
+      const result = await model.generateContent(contextualPrompt);
       const response = await result.response;
       const aiText = cleanAIResponse(response.text());
 
@@ -264,23 +263,22 @@ const HoiDapAI = () => {
         timestamp: new Date()
       };
 
-      // Lưu phản hồi của AI
-      console.log("Saving AI response to session:", sessionId);
       await addDoc(collection(db, `users/${userId}/chat_sessions/${sessionId}/messages`), aiResponse);
 
-      // Cập nhật session
       const sessionRef = doc(db, `users/${userId}/chat_sessions/${sessionId}`);
       await updateDoc(sessionRef, {
         lastMessage: aiText,
         timestamp: new Date()
       });
 
-      console.log("Session updated successfully");
       setIsLoading(false);
 
     } catch (error) {
       console.error("Error in AI response:", error);
-      Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
+      Alert.alert(
+        "Lỗi", 
+        "Không thể nhận được câu trả lời. Vui lòng thử lại sau hoặc liên hệ hỗ trợ nếu lỗi vẫn tiếp tục."
+      );
       setIsLoading(false);
     }
   };
@@ -294,29 +292,63 @@ const HoiDapAI = () => {
       ]}
     >
       <View style={styles.messageContent}>
-        <Text style={styles.messageText}>{message.text}</Text>
-        <Text style={styles.timestamp}>
+        <View style={styles.messageHeader}>
+          {message.sender === 'ai' && (
+            <View style={styles.aiAvatar}>
+              <Ionicons name="logo-android" size={20} color="#4CAF50" />
+            </View>
+          )}
+        </View>
+        <Text style={[
+          styles.messageText,
+          message.sender === 'user' ? styles.userMessageText : styles.aiMessageText
+        ]}>
+          {message.text}
+        </Text>
+        <Text style={[
+          styles.timestamp,
+          message.sender === 'user' ? styles.userTimestamp : styles.aiTimestamp
+        ]}>
           {message.timestamp.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
         </Text>
       </View>
     </View>
   );
 
-  const renderChatSession = ({ item }: { item: ChatSession }) => (
-    <TouchableOpacity
-      style={styles.sessionItem}
-      onPress={() => loadChatSession(item.id)}
-    >
-      <View style={styles.sessionContent}>
-        <Text style={styles.sessionTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.sessionLastMessage} numberOfLines={1}>{item.lastMessage}</Text>
-        <Text style={styles.sessionTime}>
-          {format(item.timestamp, "HH:mm dd/MM/yyyy", { locale: vi })}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={24} color="#666" />
-    </TouchableOpacity>
-  );
+  const renderChatSession = ({ item }: { item: ChatSession }) => {
+    const formattedDate = format(item.timestamp, "HH:mm - dd/MM/yyyy", { locale: vi });
+    return (
+      <TouchableOpacity
+        style={[
+          styles.sessionItem,
+          currentSessionId === item.id && styles.activeSessionItem
+        ]}
+        onPress={() => {
+          loadChatSession(item.id);
+          setShowHistory(false);
+        }}
+      >
+        <View style={styles.sessionIconContainer}>
+          <Ionicons 
+            name="chatbubble-ellipses" 
+            size={24} 
+            color={currentSessionId === item.id ? "#007AFF" : "#666"} 
+          />
+        </View>
+        <View style={styles.sessionContent}>
+          <View style={styles.sessionHeader}>
+            <Text style={styles.sessionTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            <Text style={styles.sessionDate}>{formattedDate}</Text>
+          </View>
+          <Text style={styles.sessionLastMessage} numberOfLines={2}>
+            {item.lastMessage}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const renderHistoryContent = () => {
     if (isLoadingHistory) {
@@ -328,60 +360,39 @@ const HoiDapAI = () => {
       );
     }
 
-    if (historyError) {
-      return (
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={48} color="#FF3B30" />
-          <Text style={styles.errorText}>{historyError}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => {
-              setHistoryError(null);
-              // Reload history
-              const userId = auth.currentUser?.uid;
-              if (userId) {
-                const sessionsQuery = query(
-                  collection(db, `users/${userId}/chat_sessions`),
-                  orderBy('timestamp', 'desc')
-                );
-                getDocs(sessionsQuery).then(snapshot => {
-                  const sessions = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    title: doc.data().title || 'Cuộc trò chuyện mới',
-                    lastMessage: doc.data().lastMessage || '',
-                    timestamp: doc.data().timestamp?.toDate() || new Date(),
-                    messages: []
-                  }));
-                  setChatSessions(sessions);
-                }).catch(error => {
-                  setHistoryError("Không thể tải lịch sử trò chuyện. Vui lòng thử lại.");
-                });
-              }
-            }}
-          >
-            <Text style={styles.retryButtonText}>Thử lại</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-
-    if (chatSessions.length === 0) {
-      return (
-        <View style={styles.emptyState}>
-          <Ionicons name="chatbubble-outline" size={48} color="#999" />
-          <Text style={styles.emptyStateText}>Chưa có cuộc trò chuyện nào</Text>
-        </View>
-      );
-    }
-
     return (
-      <FlatList
-        data={chatSessions}
-        renderItem={renderChatSession}
-        keyExtractor={item => item.id}
-        style={styles.sessionsList}
-        contentContainerStyle={styles.sessionsListContent}
-      />
+      <View style={styles.historyContainer}>
+        <TouchableOpacity
+          style={styles.newChatButton}
+          onPress={() => {
+            startNewChat();
+            setShowHistory(false);
+          }}
+        >
+          <Ionicons name="add-circle" size={24} color="#007AFF" />
+          <Text style={styles.newChatText}>Bắt đầu cuộc trò chuyện mới</Text>
+        </TouchableOpacity>
+
+        {chatSessions.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="chatbubbles-outline" size={48} color="#999" />
+            <Text style={styles.emptyStateTitle}>Chưa có cuộc trò chuyện nào</Text>
+            <Text style={styles.emptyStateText}>
+              Bắt đầu cuộc trò chuyện mới để lưu trữ lịch sử chat của bạn
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={chatSessions}
+            renderItem={renderChatSession}
+            keyExtractor={item => item.id}
+            style={styles.sessionsList}
+            contentContainerStyle={styles.sessionsListContent}
+            ItemSeparatorComponent={() => <View style={styles.sessionSeparator} />}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+      </View>
     );
   };
 
@@ -392,43 +403,72 @@ const HoiDapAI = () => {
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Hỏi đáp với AI</Text>
-        <TouchableOpacity onPress={() => setShowHistory(true)} style={styles.historyButton}>
-          <Ionicons name="time-outline" size={24} color="#007AFF" />
+        <TouchableOpacity 
+          onPress={() => setShowHistory(true)} 
+          style={styles.historyButton}
+        >
+          <View style={styles.historyButtonContent}>
+            <Ionicons name="time" size={24} color="#007AFF" />
+            {chatSessions.length > 0 && (
+              <View style={styles.historyBadge}>
+                <Text style={styles.historyBadgeText}>{chatSessions.length}</Text>
+              </View>
+            )}
+          </View>
         </TouchableOpacity>
       </View>
 
       <ScrollView
         ref={scrollViewRef}
         style={styles.messagesContainer}
+        contentContainerStyle={styles.messagesContent}
         onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
       >
-        {messages.map(renderMessage)}
+        {messages.length === 0 ? (
+          <View style={styles.welcomeContainer}>
+            <View style={styles.aiWelcomeAvatar}>
+              <Ionicons name="logo-android" size={40} color="#4CAF50" />
+            </View>
+            <Text style={styles.welcomeTitle}>Xin chào! Tôi có thể giúp gì cho bạn?</Text>
+            <Text style={styles.welcomeText}>Hãy đặt câu hỏi, tôi sẽ cố gắng trả lời chi tiết nhất có thể.</Text>
+          </View>
+        ) : (
+          messages.map(renderMessage)
+        )}
         {isLoading && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color="#007AFF" />
-            <Text style={styles.loadingText}>AI đang trả lời...</Text>
+            <View style={styles.loadingContent}>
+              <ActivityIndicator size="small" color="#007AFF" />
+              <Text style={styles.loadingText}>AI đang trả lời...</Text>
+            </View>
           </View>
         )}
       </ScrollView>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         style={styles.inputContainer}
       >
         <TextInput
           style={styles.input}
           placeholder="Nhập câu hỏi của bạn..."
+          placeholderTextColor="#999"
           value={inputText}
           onChangeText={setInputText}
           multiline
+          maxLength={1000}
         />
         <TouchableOpacity
-          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton,
+            !inputText.trim() && styles.sendButtonDisabled
+          ]}
           onPress={handleSend}
           disabled={!inputText.trim() || isLoading}
         >
           <Ionicons
-            name={isLoading ? "time-outline" : "send"}
+            name={isLoading ? "time" : "send"}
             size={24}
             color={!inputText.trim() || isLoading ? "#999" : "#007AFF"}
           />
@@ -453,17 +493,6 @@ const HoiDapAI = () => {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={styles.newChatButton}
-              onPress={() => {
-                startNewChat();
-                setShowHistory(false);
-              }}
-            >
-              <Ionicons name="add-circle-outline" size={24} color="#007AFF" />
-              <Text style={styles.newChatText}>Cuộc trò chuyện mới</Text>
-            </TouchableOpacity>
-
             {renderHistoryContent()}
           </View>
         </View>
@@ -475,7 +504,7 @@ const HoiDapAI = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F5',
+    backgroundColor: '#F8F9FA',
   },
   header: {
     flexDirection: 'row',
@@ -485,6 +514,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   backButton: {
     padding: screenWidth * 0.02,
@@ -499,57 +533,137 @@ const styles = StyleSheet.create({
   historyButton: {
     padding: screenWidth * 0.02,
   },
+  historyButtonContent: {
+    position: 'relative',
+  },
+  historyBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  historyBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   messagesContainer: {
     flex: 1,
+  },
+  messagesContent: {
     padding: screenWidth * 0.04,
+    paddingBottom: screenHeight * 0.02,
+  },
+  welcomeContainer: {
+    alignItems: 'center',
+    padding: screenWidth * 0.06,
+    marginTop: screenHeight * 0.1,
+  },
+  aiWelcomeAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#E8F5E9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  welcomeTitle: {
+    fontSize: screenWidth * 0.05,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  welcomeText: {
+    fontSize: screenWidth * 0.04,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
   },
   messageContainer: {
-    maxWidth: '80%',
+    maxWidth: '85%',
     marginBottom: screenHeight * 0.02,
-    borderRadius: 12,
-    padding: screenWidth * 0.04,
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
-    borderBottomRightRadius: 4,
   },
   aiMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 4,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   messageContent: {
-    flexDirection: 'column',
+    borderRadius: 16,
+    padding: screenWidth * 0.04,
   },
-  messageText: {
-    fontSize: screenWidth * 0.035,
-    color: '#333333',
-    marginBottom: screenHeight * 0.01,
+  messageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
   },
-  timestamp: {
-    fontSize: screenWidth * 0.025,
-    color: '#666666',
-    alignSelf: 'flex-end',
-  },
-  loadingContainer: {
-    flex: 1,
+  aiAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#E8F5E9',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: screenWidth * 0.1,
+    marginRight: 8,
+  },
+  messageText: {
+    fontSize: screenWidth * 0.038,
+    lineHeight: screenWidth * 0.052,
+  },
+  userMessageText: {
+    color: '#FFFFFF',
+    backgroundColor: '#007AFF',
+    borderRadius: 16,
+    borderBottomRightRadius: 4,
+    padding: screenWidth * 0.04,
+  },
+  aiMessageText: {
+    color: '#333333',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderBottomLeftRadius: 4,
+    padding: screenWidth * 0.04,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  timestamp: {
+    fontSize: screenWidth * 0.03,
+    marginTop: 4,
+  },
+  userTimestamp: {
+    color: '#rgba(255, 255, 255, 0.7)',
+    alignSelf: 'flex-end',
+  },
+  aiTimestamp: {
+    color: '#999',
+    alignSelf: 'flex-start',
+  },
+  loadingContainer: {
+    alignItems: 'flex-start',
+    marginBottom: screenHeight * 0.02,
+  },
+  loadingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F0F0',
+    padding: screenWidth * 0.03,
+    borderRadius: 16,
   },
   loadingText: {
-    fontSize: screenWidth * 0.04,
-    color: '#666666',
-    marginTop: screenHeight * 0.02,
+    marginLeft: 8,
+    fontSize: screenWidth * 0.035,
+    color: '#666',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -564,13 +678,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     borderRadius: 20,
     paddingHorizontal: screenWidth * 0.04,
-    paddingVertical: screenWidth * 0.02,
-    maxHeight: 100,
-    fontSize: screenWidth * 0.035,
+    paddingVertical: screenWidth * 0.03,
+    fontSize: screenWidth * 0.038,
+    maxHeight: 120,
+    color: '#333',
   },
   sendButton: {
-    marginLeft: screenWidth * 0.02,
-    padding: screenWidth * 0.02,
+    marginLeft: screenWidth * 0.03,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F0F0F0',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sendButtonDisabled: {
     opacity: 0.5,
@@ -584,100 +704,112 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: screenWidth * 0.04,
-    maxHeight: screenHeight * 0.8,
+    height: screenHeight * 0.7,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: screenHeight * 0.02,
+    padding: screenWidth * 0.04,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
   },
   modalTitle: {
-    fontSize: screenWidth * 0.05,
+    fontSize: screenWidth * 0.045,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#333',
+  },
+  closeButton: {
+    padding: screenWidth * 0.02,
+  },
+  historyContainer: {
+    flex: 1,
   },
   newChatButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#F0F7FF',
+    margin: screenWidth * 0.04,
     padding: screenWidth * 0.04,
-    backgroundColor: '#F5F5F5',
     borderRadius: 12,
-    marginBottom: screenHeight * 0.02,
   },
   newChatText: {
+    marginLeft: screenWidth * 0.02,
     fontSize: screenWidth * 0.04,
     color: '#007AFF',
-    marginLeft: screenWidth * 0.02,
-  },
-  sessionsList: {
-    flex: 1,
+    fontWeight: '600',
   },
   sessionItem: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: screenWidth * 0.04,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    backgroundColor: '#FFFFFF',
+  },
+  activeSessionItem: {
+    backgroundColor: '#F0F7FF',
+  },
+  sessionIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F5F7FA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: screenWidth * 0.03,
   },
   sessionContent: {
     flex: 1,
-    marginRight: screenWidth * 0.02,
+  },
+  sessionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   sessionTitle: {
+    flex: 1,
     fontSize: screenWidth * 0.04,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: screenHeight * 0.005,
+    fontWeight: '600',
+    color: '#333',
+    marginRight: screenWidth * 0.02,
+  },
+  sessionDate: {
+    fontSize: screenWidth * 0.03,
+    color: '#999',
   },
   sessionLastMessage: {
     fontSize: screenWidth * 0.035,
-    color: '#666666',
-    marginBottom: screenHeight * 0.005,
+    color: '#666',
+    lineHeight: 20,
   },
-  sessionTime: {
-    fontSize: screenWidth * 0.03,
-    color: '#999999',
+  sessionSeparator: {
+    height: 1,
+    backgroundColor: '#E0E0E0',
   },
-  errorContainer: {
+  sessionsList: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: screenWidth * 0.1,
   },
-  errorText: {
-    fontSize: screenWidth * 0.04,
-    color: '#FF3B30',
-    marginTop: screenHeight * 0.02,
-    textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: screenHeight * 0.02,
-    padding: screenWidth * 0.04,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#FFFFFF',
-    fontSize: screenWidth * 0.04,
-    fontWeight: '500',
+  sessionsListContent: {
+    paddingBottom: screenWidth * 0.04,
   },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: screenWidth * 0.06,
+  },
+  emptyStateTitle: {
+    fontSize: screenWidth * 0.045,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: screenHeight * 0.02,
+    marginBottom: screenHeight * 0.01,
   },
   emptyStateText: {
-    fontSize: screenWidth * 0.04,
-    color: '#999',
-    marginTop: screenHeight * 0.02,
-  },
-  closeButton: {
-    padding: screenWidth * 0.02,
-  },
-  sessionsListContent: {
-    padding: screenWidth * 0.04,
+    fontSize: screenWidth * 0.035,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: screenWidth * 0.1,
   },
 });
 

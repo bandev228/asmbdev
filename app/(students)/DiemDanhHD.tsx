@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, SafeAreaView, ActivityIndicator, Modal, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { getFirestore, collection, query, where, getDocs, addDoc, serverTimestamp } from '@react-native-firebase/firestore';

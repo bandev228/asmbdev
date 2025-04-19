@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -12,158 +12,39 @@ import {
   Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getFirestore, collection, doc, getDocs, updateDoc, onSnapshot, query, where, orderBy } from '@react-native-firebase/firestore';
-import { getAuth } from '@react-native-firebase/auth';
 import { Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-
-interface Notification {
-  id: string;
-  title: string;
-  message: string;
-  type: string;
-  createdAt: Date;
-  read: boolean;
-  isRead: boolean;
-  userId: string;
-  activityId?: string;
-}
+import { useNotifications, Notification } from './hooks/useNotifications';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
 
-// Declare __DEV__ if it's not already defined (e.g., in a testing environment)
-const __DEV__ = process.env.NODE_ENV === 'development';
-
 const ThongBao = () => {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  const auth = getAuth();
-  const db = getFirestore();
+  const { 
+    notifications, 
+    loading, 
+    error, 
+    unreadCount, 
+    markAsRead, 
+    refetch 
+  } = useNotifications();
 
-  // Sử dụng useFocusEffect để tải lại thông báo khi màn hình được focus
   useFocusEffect(
     useCallback(() => {
-      fetchNotifications();
-      return () => {
-      };
-    }, [])
+      refetch();
+      return () => {};
+    }, [refetch])
   );
 
-  useEffect(() => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      setError('Người dùng chưa đăng nhập');
-      setLoading(false);
-      return;
-    }
-
-    const notificationsQuery = query(
-      collection(db, 'notifications'),
-      where('userId', '==', currentUser.uid),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(notificationsQuery, 
-      (snapshot) => {
-        const notificationsList = snapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            title: data.title || "Không có tiêu đề",
-            message: data.message || "Không có nội dung",
-            type: data.type || "info",
-            createdAt: data.createdAt ? new Date(data.createdAt.toDate()) : new Date(),
-            read: data.read || false,
-            isRead: data.read || false,
-            userId: data.userId || currentUser.uid,
-            activityId: data.activityId
-          } as Notification;
-        });
-        setNotifications(notificationsList);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('Error fetching notifications:', err);
-        setError('Không thể tải thông báo');
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  const fetchNotifications = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const notificationsRef = collection(db, 'notifications');
-      const querySnapshot = await getDocs(notificationsRef);
-      
-      if (querySnapshot.empty) {
-        console.log("No notifications found");
-        setNotifications([]);
-        setUnreadCount(0);
-      } else {
-        
-        const notificationsList: Notification[] = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          
-          // Kiểm tra trạng thái đã đọc
-          const isRead = data.read === true;
-          
-          return {
-            id: doc.id,
-            title: data.title || "Không có tiêu đề",
-            message: data.message || "Không có nội dung",
-            type: data.type || "info",
-            createdAt: data.createdAt ? new Date(data.createdAt.toDate()) : new Date(),
-            read: isRead,
-            isRead: isRead,
-            userId: data.userId || auth.currentUser?.uid || "",
-            activityId: data.activityId
-          } as Notification;
-        });
-        
-        // Đếm số thông báo chưa đọc
-        const unread = notificationsList.filter(notification => !notification.isRead).length;
-        setUnreadCount(unread);
-        setNotifications(notificationsList);
-        
-        console.log(`Processed ${notificationsList.length} notifications, ${unread} unread`);
-      }
-    } catch (error) {
-      console.error("Error fetching notifications:", error);
-      setError("Không thể tải thông báo. Vui lòng thử lại sau.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchNotifications();
-  };
+    refetch().finally(() => setRefreshing(false));
+  }, [refetch]);
 
-  const handleMarkAsRead = async (notificationId: string) => {
-    try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await updateDoc(notificationRef, {
-        read: true
-      });
-    } catch (err) {
-      console.error('Error marking notification as read:', err);
-      Alert.alert('Lỗi', 'Không thể đánh dấu thông báo đã đọc');
-    }
-  };
-
-  const handleNotificationPress = (notification: Notification) => {
+  const handleNotificationPress = async (notification: Notification) => {
     // Hiển thị chi tiết thông báo
     Alert.alert(
       notification.title,
@@ -173,7 +54,11 @@ const ThongBao = () => {
     
     // Đánh dấu đã đọc nếu chưa đọc
     if (!notification.isRead) {
-      handleMarkAsRead(notification.id);
+      try {
+        await markAsRead(notification.id);
+      } catch (err) {
+        console.error('Error marking notification as read:', err);
+      }
     }
     
     if (notification.activityId) {
@@ -211,9 +96,8 @@ const ThongBao = () => {
     }
   };
 
-  const getNotificationIcon = (notification: Notification) => {
-    // Dựa vào activityId để xác định loại thông báo
-    if (notification.activityId) {
+  const getNotificationIcon = (notification: Notification): keyof typeof Ionicons.glyphMap => {
+    if (notification.type === 'activity') {
       return 'calendar-outline';
     }
     return 'notifications-outline';
@@ -221,6 +105,12 @@ const ThongBao = () => {
 
   const renderNotificationItem = ({ item }: { item: Notification }) => {
     const icon = getNotificationIcon(item);
+    const iconColor = item.type === 'activity' ? "#4CAF50" : "#007AFF";
+    const MAX_CONTENT_LENGTH = 150;
+    const isContentLong = item.message.length > MAX_CONTENT_LENGTH;
+    const truncatedContent = isContentLong 
+      ? item.message.substring(0, MAX_CONTENT_LENGTH) + '...' 
+      : item.message;
     
     return (
       <TouchableOpacity 
@@ -231,24 +121,57 @@ const ThongBao = () => {
         onPress={() => handleNotificationPress(item)}
         activeOpacity={0.7}
       >
-        <View style={styles.notificationHeader}>
-          <Ionicons 
-            name={icon} 
-            size={screenWidth * 0.06} 
-            color={item.activityId ? "#4CAF50" : "#007AFF"} 
-          />
-          <Text style={[
-            styles.notificationTitle,
-            !item.isRead && styles.unreadText
-          ]}>
-            {item.title}
-          </Text>
-          {!item.isRead && <View style={styles.unreadDot} />}
+        <View style={styles.notificationContent}>
+          <View style={styles.notificationHeader}>
+            <View style={styles.iconContainer}>
+              <Ionicons 
+                name={icon} 
+                size={screenWidth * 0.05} 
+                color={iconColor} 
+              />
+            </View>
+            <View style={styles.headerTextContainer}>
+              <Text style={[
+                styles.notificationTitle,
+                !item.isRead && styles.unreadText
+              ]}>
+                {item.title}
+              </Text>
+              <Text style={styles.notificationTime}>
+                {getTimeAgo(item.createdAt)}
+              </Text>
+            </View>
+            {!item.isRead && <View style={styles.unreadDot} />}
+          </View>
+
+          <View style={styles.messageContainer}>
+            <Text style={styles.notificationMessage}>{truncatedContent}</Text>
+            {isContentLong && (
+              <TouchableOpacity 
+                style={styles.viewMoreButton}
+                onPress={() => handleNotificationPress(item)}
+              >
+                <Text style={styles.viewMoreText}>Xem thêm</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {item.senderName && (
+            <View style={styles.footerContainer}>
+              <Text style={styles.senderText}>
+                Người gửi: {item.senderName}
+              </Text>
+              {item.activityId && (
+                <TouchableOpacity 
+                  style={styles.activityButton}
+                  onPress={() => handleNotificationPress(item)}
+                >
+                  <Ionicons name="arrow-forward" size={screenWidth * 0.04} color="#007AFF" />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
-        <Text style={styles.notificationMessage}>{item.message}</Text>
-        <Text style={styles.notificationDate}>
-          {getTimeAgo(item.createdAt)}
-        </Text>
       </TouchableOpacity>
     );
   };
@@ -278,7 +201,7 @@ const ThongBao = () => {
               <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Thông báo</Text>
-            <TouchableOpacity onPress={fetchNotifications} style={styles.refreshButton}>
+            <TouchableOpacity onPress={refetch} style={styles.refreshButton}>
               <Ionicons name="refresh-outline" size={screenWidth * 0.06} color="#007AFF" />
             </TouchableOpacity>
           </View>
@@ -303,23 +226,10 @@ const ThongBao = () => {
             <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Thông báo</Text>
-          <TouchableOpacity onPress={fetchNotifications} style={styles.refreshButton}>
+          <TouchableOpacity onPress={refetch} style={styles.refreshButton}>
             <Ionicons name="refresh-outline" size={screenWidth * 0.06} color="#007AFF" />
           </TouchableOpacity>
         </View>
-        
-        {/* Debug info - chỉ hiển thị trong môi trường phát triển */}
-        {__DEV__ && (
-          <View style={styles.debugContainer}>
-            <Text style={styles.debugText}>
-              Số lượng thông báo: {notifications.length}
-            </Text>
-            <Text style={styles.debugText}>
-              Thông báo chưa đọc: {unreadCount}
-            </Text>
-            {error && <Text style={styles.errorText}>Lỗi: {error}</Text>}
-          </View>
-        )}
         
         <FlatList
           data={notifications}
@@ -345,7 +255,7 @@ const ThongBao = () => {
               </Text>
               <TouchableOpacity 
                 style={styles.refreshEmptyButton}
-                onPress={fetchNotifications}
+                onPress={refetch}
               >
                 <Text style={styles.refreshEmptyText}>Làm mới</Text>
               </TouchableOpacity>
@@ -412,9 +322,8 @@ const styles = StyleSheet.create({
   },
   notificationItem: {
     backgroundColor: '#FFFFFF',
-    padding: screenWidth * 0.04,
-    marginBottom: screenHeight * 0.015,
     borderRadius: 12,
+    marginBottom: screenHeight * 0.015,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -424,44 +333,85 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
+  notificationContent: {
+    padding: screenWidth * 0.04,
+  },
   unreadNotification: {
-    backgroundColor: '#F0F7FF',
+    backgroundColor: '#F8FAFF',
     borderLeftWidth: 3,
     borderLeftColor: '#007AFF',
   },
   notificationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: screenHeight * 0.01,
+    marginBottom: screenHeight * 0.012,
   },
-  notificationTitle: {
-    fontSize: screenWidth * 0.045,
-    fontWeight: '600',
-    color: '#333333',
-    marginLeft: screenWidth * 0.03,
+  iconContainer: {
+    width: screenWidth * 0.1,
+    height: screenWidth * 0.1,
+    borderRadius: screenWidth * 0.05,
+    backgroundColor: '#F0F7FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: screenWidth * 0.03,
+  },
+  headerTextContainer: {
     flex: 1,
   },
+  notificationTitle: {
+    fontSize: screenWidth * 0.042,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 2,
+  },
   unreadText: {
-    fontWeight: '700',
     color: '#007AFF',
+    fontWeight: '700',
   },
-  notificationMessage: {
-    fontSize: screenWidth * 0.04,
-    color: '#666666',
-    marginBottom: screenHeight * 0.01,
-    lineHeight: screenWidth * 0.055,
-  },
-  notificationDate: {
+  notificationTime: {
     fontSize: screenWidth * 0.035,
     color: '#999999',
-    textAlign: 'right',
+  },
+  messageContainer: {
+    marginBottom: screenHeight * 0.01,
+  },
+  notificationMessage: {
+    fontSize: screenWidth * 0.038,
+    color: '#666666',
+    lineHeight: screenWidth * 0.052,
+  },
+  viewMoreButton: {
+    marginTop: screenHeight * 0.005,
+  },
+  viewMoreText: {
+    color: '#007AFF',
+    fontSize: screenWidth * 0.035,
+    fontWeight: '500',
+  },
+  footerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: screenHeight * 0.01,
+    paddingTop: screenHeight * 0.01,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  senderText: {
+    fontSize: screenWidth * 0.035,
+    color: '#666666',
+    fontStyle: 'italic',
+    flex: 1,
+  },
+  activityButton: {
+    padding: screenWidth * 0.02,
   },
   unreadDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: '#007AFF',
-    marginLeft: 10,
+    marginLeft: screenWidth * 0.02,
   },
   unreadHeader: {
     flexDirection: 'row',
@@ -506,21 +456,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: screenWidth * 0.04,
-  },
-  debugContainer: {
-    backgroundColor: '#FFECB3',
-    padding: 10,
-    margin: 10,
-    borderRadius: 5,
-  },
-  debugText: {
-    fontSize: 12,
-    color: '#333',
-  },
-  errorText: {
-    fontSize: 12,
-    color: 'red',
-    fontWeight: 'bold',
   },
 });
 

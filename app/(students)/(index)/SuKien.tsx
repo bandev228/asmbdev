@@ -186,6 +186,7 @@ const getCategoryColor = (category: string): string => {
     'Thể thao': '#2196F3',
     'Văn nghệ': '#9C27B0',
     'Tình nguyện': '#FF9800',
+    'Kỹ năng mềm': '#E91E63',
     'Khác': '#607D8B'
   };
   return colors[category] || '#607D8B';
@@ -202,9 +203,9 @@ const getStatusColor = (status: string): string => {
 
 const getStatusText = (status: string): string => {
   const texts: { [key: string]: string } = {
-    'pending': 'Đang chờ',
+    'pending': 'Chờ duyệt',
     'approved': 'Đã duyệt',
-    'rejected': 'Đã từ chối'
+    'rejected': 'Từ chối'
   };
   return texts[status] || 'Không xác định';
 };
@@ -264,6 +265,8 @@ const styles = StyleSheet.create({
   categoryContainer: {
     marginHorizontal: screenWidth * 0.04,
     marginBottom: screenHeight * 0.02,
+    height: 45,
+    
   },
   categoryContent: {
     paddingRight: screenWidth * 0.04,
@@ -282,6 +285,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    minWidth: 80,
   },
   selectedCategoryButton: {
     backgroundColor: '#007AFF',

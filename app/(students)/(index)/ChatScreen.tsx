@@ -53,21 +53,28 @@ const ChatScreen = () => {
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.senderId === profile?.uid;
+    const showAvatar = !isMe && item.senderId === friendId;
+    const showTime = true; // Always show time for now
+
     return (
       <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.theirMessage]}>
-        {!isMe && (
+        {showAvatar && (
           <Image
             source={{ uri: friendPhotoURL || 'https://via.placeholder.com/40' }}
             style={styles.avatar}
           />
         )}
-        <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.theirBubble]}>
-          <Text style={[styles.messageText, isMe ? styles.myText : styles.theirText]}>
-            {item.content}
-          </Text>
-          <Text style={[styles.timeText, isMe ? styles.myTime : styles.theirTime]}>
-            {format(item.timestamp, 'HH:mm', { locale: vi })}
-          </Text>
+        <View style={[styles.messageContent, isMe ? styles.myContent : styles.theirContent]}>
+          <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.theirBubble]}>
+            <Text style={[styles.messageText, isMe ? styles.myText : styles.theirText]}>
+              {item.content}
+            </Text>
+          </View>
+          {showTime && (
+            <Text style={[styles.timeText, isMe ? styles.myTime : styles.theirTime]}>
+              {format(item.timestamp, 'HH:mm', { locale: vi })}
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -77,7 +84,7 @@ const ChatScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#0084ff" />
         </View>
       </SafeAreaView>
     );
@@ -97,13 +104,16 @@ const ChatScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          <Ionicons name="arrow-back" size={24} color="#0084ff" />
         </TouchableOpacity>
         <Image
           source={{ uri: friendPhotoURL || 'https://via.placeholder.com/40' }}
           style={styles.headerAvatar}
         />
-        <Text style={styles.headerName}>{friendName}</Text>
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerName}>{friendName}</Text>
+          <Text style={styles.headerStatus}>Đang hoạt động</Text>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -122,11 +132,15 @@ const ChatScreen = () => {
         />
 
         <View style={styles.inputContainer}>
+          <TouchableOpacity style={styles.attachmentButton}>
+            <Ionicons name="attach" size={24} color="#0084ff" />
+          </TouchableOpacity>
           <TextInput
             style={styles.input}
             value={message}
             onChangeText={setMessage}
             placeholder="Nhập tin nhắn..."
+            placeholderTextColor="#8e8e93"
             multiline
           />
           <TouchableOpacity
@@ -137,7 +151,7 @@ const ChatScreen = () => {
             <Ionicons
               name="send"
               size={24}
-              color={message.trim() ? '#007AFF' : '#999'}
+              color={message.trim() ? '#0084ff' : '#c7c7cc'}
             />
           </TouchableOpacity>
         </View>
@@ -149,7 +163,7 @@ const ChatScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#ffffff',
   },
   loadingContainer: {
     flex: 1,
@@ -163,16 +177,16 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorText: {
-    color: 'red',
+    color: '#ff3b30',
     textAlign: 'center',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: '#e0e0e0',
   },
   backButton: {
     padding: 5,
@@ -183,9 +197,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginRight: 10,
   },
+  headerInfo: {
+    flex: 1,
+  },
   headerName: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  headerStatus: {
+    fontSize: 12,
+    color: '#8e8e93',
   },
   keyboardAvoidingView: {
     flex: 1,
@@ -195,7 +217,7 @@ const styles = StyleSheet.create({
   },
   messageContainer: {
     flexDirection: 'row',
-    marginVertical: 5,
+    marginVertical: 4,
     alignItems: 'flex-end',
   },
   myMessage: {
@@ -204,69 +226,80 @@ const styles = StyleSheet.create({
   theirMessage: {
     justifyContent: 'flex-start',
   },
+  messageContent: {
+    maxWidth: '70%',
+  },
+  myContent: {
+    alignItems: 'flex-end',
+  },
+  theirContent: {
+    alignItems: 'flex-start',
+  },
   avatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    marginRight: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
   },
   messageBubble: {
-    maxWidth: '70%',
     padding: 10,
-    borderRadius: 15,
+    borderRadius: 18,
+    maxWidth: '100%',
   },
   myBubble: {
-    backgroundColor: '#007AFF',
-    borderBottomRightRadius: 5,
+    backgroundColor: '#0084ff',
+    borderBottomRightRadius: 4,
   },
   theirBubble: {
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 5,
+    backgroundColor: '#e9ecef',
+    borderBottomLeftRadius: 4,
   },
   messageText: {
     fontSize: 16,
+    lineHeight: 20,
   },
   myText: {
-    color: '#FFFFFF',
+    color: '#ffffff',
   },
   theirText: {
     color: '#000000',
   },
   timeText: {
-    fontSize: 12,
-    marginTop: 5,
+    fontSize: 11,
+    marginTop: 4,
   },
   myTime: {
-    color: '#FFFFFF',
+    color: '#8e8e93',
     textAlign: 'right',
   },
   theirTime: {
-    color: '#999',
+    color: '#8e8e93',
     textAlign: 'left',
   },
   inputContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     padding: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: '#e0e0e0',
+  },
+  attachmentButton: {
+    padding: 8,
   },
   input: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#f2f2f2',
     borderRadius: 20,
     paddingHorizontal: 15,
-    paddingVertical: 10,
-    marginRight: 10,
+    paddingVertical: 8,
+    marginHorizontal: 8,
     maxHeight: 100,
+    fontSize: 16,
+    color: '#000000',
   },
   sendButton: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E0E0E0',
+    padding: 8,
   },
   sendButtonDisabled: {
     opacity: 0.5,

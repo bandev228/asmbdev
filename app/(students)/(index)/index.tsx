@@ -13,6 +13,7 @@ import {
   Platform,
   StatusBar,
   FlatList,
+  Image,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { getAuth } from "@react-native-firebase/auth"
@@ -21,11 +22,14 @@ import { GoogleSignin } from "@react-native-google-signin/google-signin"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { getFirestore, collection, doc, getDoc, updateDoc, onSnapshot, query, where, orderBy } from "@react-native-firebase/firestore"
 import { useFocusEffect } from "@react-navigation/native"
+import { format } from "date-fns"
+import { vi } from "date-fns/locale"
 
 // Custom hooks
 import { useStudentProfile } from "./hooks/useStudentProfile"
 import { useStudentStats } from "./hooks/useStudentStats"
-import { useUpcomingEvents } from "./hooks/useUpcomingEvents"
+import { useEvents } from './hooks/useEvents'
+import type { Event } from './hooks/useEvents'
 
 // Components
 import { StatCard } from "./components/StatCard"
@@ -65,10 +69,13 @@ const StudentDashboard = () => {
   // Custom hooks
   const { profile, loading: profileLoading } = useStudentProfile()
   const { stats, loading: statsLoading, refreshStats } = useStudentStats()
-  const { events: upcomingEvents, loading: eventsLoading, refreshEvents, filterEvents } = useUpcomingEvents(5)
+  const { events, loading: eventsLoading } = useEvents()
+
+  // Filter upcoming events
+  const upcomingEvents = events.slice(0, 5)
 
   // Derived state
-  const filteredEvents = searchQuery.trim() ? filterEvents(searchQuery) : upcomingEvents
+  const filteredEvents = searchQuery.trim() ? events.filter(event => event.name.toLowerCase().includes(searchQuery.toLowerCase())) : upcomingEvents
 
   const loadingState = profileLoading || statsLoading || eventsLoading
 
@@ -77,11 +84,11 @@ const StudentDashboard = () => {
     setRefreshing(true)
 
     try {
-      await Promise.all([refreshStats(), refreshEvents()])
+      await Promise.all([refreshStats()])
     } finally {
       setRefreshing(false)
     }
-  }, [refreshStats, refreshEvents])
+  }, [refreshStats])
 
   const handleSearch = (text: string) => {
     setSearchQuery(text)
@@ -200,7 +207,6 @@ const StudentDashboard = () => {
             onPress={() => {
               // Force skip loading
               refreshStats()
-              refreshEvents()
             }}
           >
             <Text style={styles.skipButtonText}>Bỏ qua</Text>
@@ -341,33 +347,48 @@ const StudentDashboard = () => {
           </View>
           <View style={styles.sectionDivider} />
 
-          {filteredEvents.length > 0 ? (
-            <FlatList
-              data={filteredEvents}
-              renderItem={({ item, index }) => (
-                <EventCard
-                  id={item.id}
-                  title={item.title}
-                  date={item.date}
-                  location={item.location}
-                  isParticipating={item.isParticipating}
-                  description={item.description}
-                  category={item.category}
-                  imageUrl={item.imageUrl}
-                  onPress={handleEventPress}
-                  index={index}
-                />
+          {eventsLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#3949AB" />
+            </View>
+          ) : upcomingEvents.length > 0 ? (
+            <FlatList<Event>
+              data={upcomingEvents}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.eventCard}
+                  onPress={() => router.push({
+                    pathname: "./ChiTietHD",
+                    params: { id: item.id }
+                  })}
+                >
+                  <Image 
+                    source={{ uri: item.bannerImageUrl }} 
+                    style={styles.eventImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.eventInfo}>
+                    <Text style={styles.eventTitle} numberOfLines={2}>{item.name}</Text>
+                    <View style={styles.eventMeta}>
+                      <View style={styles.eventMetaItem}>
+                        <Ionicons name="calendar-outline" size={14} color="#666" />
+                        <Text style={styles.eventMetaText}>
+                          {format(item.startDate.toDate(), "dd/MM/yyyy", { locale: vi })}
+                        </Text>
+                      </View>
+                      <View style={styles.eventMetaItem}>
+                        <Ionicons name="location-outline" size={14} color="#666" />
+                        <Text style={styles.eventMetaText} numberOfLines={1}>{item.location}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
               )}
               keyExtractor={(item) => item.id}
               horizontal={true}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.eventsList}
             />
-          ) : searchQuery ? (
-            <View style={styles.noDataContainer}>
-              <Ionicons name="search-outline" size={48} color="#C5CAE9" />
-              <Text style={styles.noDataText}>Không tìm thấy sự kiện phù hợp</Text>
-            </View>
           ) : (
             <View style={styles.noDataContainer}>
               <Ionicons name="calendar-outline" size={48} color="#C5CAE9" />
@@ -660,6 +681,43 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#E5E9F0",
+  },
+  eventCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  eventImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 4,
+    marginRight: 12,
+  },
+  eventInfo: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 4,
+  },
+  eventMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  eventMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  eventMetaText: {
+    fontSize: 14,
+    color: "#666",
   },
 })
 

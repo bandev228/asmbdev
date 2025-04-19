@@ -19,8 +19,10 @@ import {
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { getAuth, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential, linkWithCredential, unlink } from "@react-native-firebase/auth"
-import { getFirestore, doc, getDoc, updateDoc } from "@react-native-firebase/firestore"
+import { getFirestore, doc, getDoc, updateDoc, serverTimestamp } from "@react-native-firebase/firestore"
+import storage from '@react-native-firebase/storage'
 import * as ImagePicker from "expo-image-picker"
+import * as ImageManipulator from 'expo-image-manipulator'
 import { useRouter } from "expo-router"
 import * as FileSystem from "expo-file-system"
 import * as LocalAuthentication from "expo-local-authentication"
@@ -134,7 +136,10 @@ const StudentTaiKhoan = () => {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync()
       
       if (!permissionResult.granted) {
-        Alert.alert("Cần quyền truy cập", "Vui lòng cấp quyền truy cập thư viện ảnh")
+        Alert.alert(
+          "Cần quyền truy cập", 
+          "Vui lòng cấp quyền truy cập thư viện ảnh để thay đổi ảnh đại diện"
+        )
         return
       }
 
@@ -142,7 +147,8 @@ const StudentTaiKhoan = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 1,
+        allowsMultipleSelection: false,
       })
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -151,73 +157,83 @@ const StudentTaiKhoan = () => {
       }
     } catch (err) {
       console.error("Error picking image:", err)
-      Alert.alert("Lỗi", "Không thể chọn ảnh. Vui lòng thử lại.")
+      Alert.alert(
+        "Lỗi",
+        "Không thể chọn ảnh. Vui lòng thử lại."
+      )
     }
   }
 
   const uploadImage = async (uri: string) => {
     try {
-      setIsSaving(true)
-      const currentUser = auth.currentUser
-      if (!currentUser) {
-        Alert.alert("Lỗi", "Không tìm thấy người dùng")
-        return
+      // Confirm with user about face recognition usage
+      const userConfirmed = await new Promise((resolve) => {
+        Alert.alert(
+          "Xác nhận cập nhật ảnh đại diện",
+          "Ảnh này sẽ được sử dụng làm ảnh đại diện và dùng cho nhận diện khuôn mặt khi điểm danh. Bạn có muốn tiếp tục?",
+          [
+            {
+              text: "Hủy",
+              style: "cancel",
+              onPress: () => resolve(false)
+            },
+            {
+              text: "Đồng ý",
+              onPress: () => resolve(true)
+            }
+          ]
+        );
+      });
+
+      if (!userConfirmed) {
+        return;
       }
 
-      // Nén ảnh trước khi chuyển đổi
-      const compressedImage = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.3, // Giảm chất lượng xuống 30% để giảm kích thước
-        base64: true, // Trả về dạng base64
-      })
+      setLoading(true);
 
-      if (!compressedImage.canceled && compressedImage.assets && compressedImage.assets.length > 0) {
-        const base64 = compressedImage.assets[0].base64
-        if (!base64) {
-          throw new Error("Không thể chuyển đổi ảnh")
-        }
+      // Resize and compress image
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 500, height: 500 } }],
+        { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG }
+      );
 
-        // Kiểm tra kích thước base64 (tối đa 1MB)
-        const base64Size = (base64.length * 3) / 4
-        if (base64Size > 1024 * 1024) { // 1MB
-          Alert.alert("Lỗi", "Ảnh quá lớn. Vui lòng chọn ảnh nhỏ hơn")
-          return
-        }
+      // Upload to Firebase Storage
+      const filename = `avatars/${auth.currentUser?.uid}/profile-${Date.now()}.jpg`;
+      const reference = storage().ref(filename);
+      
+      // Upload the file
+      await reference.putFile(manipulatedImage.uri);
+      const downloadURL = await reference.getDownloadURL();
 
-        // Tạo URL base64
-        const imageUrl = `data:image/jpeg;base64,${base64}`
+      // Update user profile
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, {
+          photoURL: downloadURL
+        });
 
-        try {
-          // Update auth profile
-          await updateProfile(currentUser, {
-            photoURL: imageUrl
-          })
-          
-          // Update Firestore
-          await updateDoc(doc(db, "users", currentUser.uid), {
-            photoURL: imageUrl
-          })
-          
-          setUpdatedUser({
-            ...updatedUser,
-            photoURL: imageUrl
-          })
-          
-          Alert.alert("Thành công", "Ảnh đại diện đã được cập nhật")
-        } catch (updateError) {
-          console.error("Error updating profile:", updateError)
-          Alert.alert("Lỗi", "Không thể cập nhật ảnh đại diện. Vui lòng thử lại.")
-        }
+        // Update Firestore document
+        const userRef = doc(db, 'users', auth.currentUser.uid);
+        await updateDoc(userRef, {
+          photoURL: downloadURL,
+          lastAvatarUpdate: serverTimestamp()
+        });
+
+        Alert.alert(
+          "Thành công",
+          "Cập nhật ảnh đại diện thành công!"
+        );
       }
-    } catch (err) {
-      console.error("Error uploading image:", err)
-      Alert.alert("Lỗi", "Không thể tải lên ảnh. Vui lòng thử lại.")
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      Alert.alert(
+        "Lỗi",
+        "Không thể cập nhật ảnh đại diện. Vui lòng thử lại sau."
+      );
     } finally {
-      setIsSaving(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleUpdateProfile = async () => {
     if (!user) return
