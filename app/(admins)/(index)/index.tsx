@@ -2,165 +2,74 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, FlatList, Alert, Dimensions, ActivityIndicator, RefreshControl, Platform, Animated, StatusBar} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getApp } from '@react-native-firebase/app';
-import { 
-  getAuth,
-  signOut 
-} from '@react-native-firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  getDocs,
-  doc,
-  getDoc,
-  query,
-  orderBy,
-  limit,
-  Timestamp,
-  where
-} from '@react-native-firebase/firestore';
+import { getAuth, signOut } from '@react-native-firebase/auth';
 import { PieChart } from 'react-native-chart-kit';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '@react-navigation/native';
+import { getFirestore, collection, query, where, getDocs } from '@react-native-firebase/firestore';
+import { ActivityData, ChartDataItem, DashboardStats } from './hooks/types';
+
+import { useDashboardData } from './hooks/useDashboardData';
+import { StatCard } from './components/StatCard';
+import { DashboardButton } from './components/DashboardButton';
+import { FeaturedActivityItem } from './components/FeaturedActivityItem';
 
 const { width, height } = Dimensions.get('window');
 const isTablet = width > 768;
 
-interface DashboardButtonProps {
-  title: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  color?: string;
-}
-
-interface StatCardProps {
-  value: number;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  fadeAnim: Animated.Value;
-  translateY: Animated.Value;
-}
-
-interface AnimationItem {
-  fade: Animated.Value;
-  translateX: Animated.Value;
-}
-
-interface ChartDataItem {
-  name: string;
-  population: number;
-  color: string;
-  legendFontColor: string;
-  legendFontSize: number;
-}
-
-interface ActivityData {
-  id?: string;
-  name: string;
-  participants: string[];
-  status: 'pending' | 'approved';
-  date: Timestamp;
-  location: string;
-  createdAt?: Timestamp;
-  description?: string;
-}
-
-// Initialize Firebase - React Native Firebase handles initialization automatically
+// Initialize Firebase
 const app = getApp();
 const auth = getAuth();
-const firestore = getFirestore();
 
-// Tách DashboardButton ra khỏi component chính
-const DashboardButton = ({ title, icon, onPress, color = '#007AFF' }: DashboardButtonProps) => {
-  // Animation for button press
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  
-  const onPressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.95,
-      useNativeDriver: true,
-    }).start();
-  };
-  
-  const onPressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      friction: 4,
-      tension: 40,
-      useNativeDriver: true,
-    }).start();
-  };
+const fetchDashboardData = async (): Promise<DashboardStats> => {
+  const db = getFirestore();
+  const activitiesRef = collection(db, 'activities');
+  const usersRef = collection(db, 'users');
 
-  return (
-    <Animated.View 
-      style={[
-        styles.dashboardButtonContainer,
-        { transform: [{ scale: scaleAnim }] }
-      ]}
-    >
-      <TouchableOpacity 
-        style={[styles.dashboardButton, { borderLeftColor: color }]} 
-        onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        activeOpacity={0.7}
-      >
-        <Ionicons name={icon} size={24} color={color} />
-        <Text style={[styles.dashboardButtonText, { color: '#333' }]}>{title}</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  );
+  const [activitiesSnapshot, usersSnapshot] = await Promise.all([
+    getDocs(activitiesRef),
+    getDocs(usersRef)
+  ]);
+
+  const activities = activitiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityData));
+  const totalActivities = activities.length;
+  const pendingActivities = activities.filter(activity => activity.status === 'pending').length;
+  const approvedActivities = activities.filter(activity => activity.status === 'approved').length;
+  const totalUsers = usersSnapshot.size;
+
+  return {
+    totalActivities,
+    pendingActivities,
+    totalUsers,
+    approvedActivities
+  };
 };
-
-// Tách StatCard ra khỏi component chính
-const StatCard = ({ value, label, icon, color, fadeAnim, translateY }: StatCardProps) => (
-  <Animated.View 
-    style={[
-      styles.statItem, 
-      { 
-        opacity: fadeAnim,
-        transform: [{ translateY }]
-      }
-    ]}
-  >
-    <View style={[styles.statIconContainer, { backgroundColor: `${color}20` }]}>
-      <Ionicons name={icon} size={24} color={color} />
-    </View>
-    <Text style={[styles.statValue, { color }]}>{value}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
-  </Animated.View>
-);
 
 export default function AdminDashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [stats, setStats] = useState({
-    totalActivities: 0,
-    pendingActivities: 0,
-    totalUsers: 0,
-    approvedActivities: 0,
-  });
-  const [featuredActivities, setFeaturedActivities] = useState<(ActivityData & { id: string })[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [chartData, setChartData] = useState<ChartDataItem[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [filteredActivities, setFilteredActivities] = useState<(ActivityData & { id: string })[]>([]);
-  const [error, setError] = useState<string | null>(null);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(50)).current;
+  const itemAnimations = useRef<{ fade: Animated.Value; translateX: Animated.Value; }[]>([]);
 
-  // Tạo mảng để lưu trữ animation values cho danh sách hoạt động
-  const itemAnimations = useRef<AnimationItem[]>([]);
-  
-  // Thêm biến để theo dõi nếu component đã unmount
-  const isMounted = useRef(true);
+  // Use custom hook for dashboard data
+  const { 
+    stats, 
+    featuredActivities, 
+    loading, 
+    error, 
+    chartData, 
+    refetch 
+  } = useDashboardData();
 
-  // Khởi tạo animation values cho danh sách hoạt động
+  // Initialize animations for featured activities
   useEffect(() => {
     if (featuredActivities.length > 0 && itemAnimations.current.length === 0) {
       featuredActivities.forEach((_, index) => {
@@ -170,7 +79,6 @@ export default function AdminDashboard() {
         };
       });
       
-      // Animate each item
       featuredActivities.forEach((_, index) => {
         Animated.parallel([
           Animated.timing(itemAnimations.current[index].fade, {
@@ -191,10 +99,6 @@ export default function AdminDashboard() {
   }, [featuredActivities]);
 
   useEffect(() => {
-    // Thiết lập isMounted khi component mount
-    isMounted.current = true;
-    
-    // Start entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -207,186 +111,11 @@ export default function AdminDashboard() {
         useNativeDriver: true,
       })
     ]).start();
-    
-    // Tải dữ liệu ban đầu
-    fetchData();
-
-    // Cleanup khi component unmount
-    return () => {
-      isMounted.current = false;
-    };
   }, []);
-
-  // Sửa lại hàm fetchData để xử lý lỗi tốt hơn và có fallback
-  const fetchData = async () => {
-    if (!isMounted.current) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Thêm timeout để tránh treo vô hạn
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout fetching data')), 15000)
-      );
-      
-      // Chạy song song với timeout
-      await Promise.race([
-        Promise.all([
-          fetchStats(),
-          fetchFeaturedActivities()
-        ]),
-        timeoutPromise
-      ]);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      setError(error instanceof Error ? error.message : 'An unknown error occurred');
-      
-      // Thiết lập dữ liệu mặc định để tránh màn hình trống
-      setStats({
-        totalActivities: 0,
-        pendingActivities: 0,
-        totalUsers: 0,
-        approvedActivities: 0,
-      });
-      
-      setChartData([
-        {
-          name: 'Đã duyệt',
-          population: 0,
-          color: '#4CAF50',
-          legendFontColor: '#7F7F7F',
-          legendFontSize: 13,
-        },
-        {
-          name: 'Chờ duyệt',
-          population: 0,
-          color: '#FFC107',
-          legendFontColor: '#7F7F7F',
-          legendFontSize: 13,
-        },
-      ]);
-      
-      setFeaturedActivities([]);
-      setFilteredActivities([]);
-      
-      if (isMounted.current) {
-        Alert.alert(
-          'Lỗi kết nối',
-          'Không thể tải dữ liệu. Vui lòng kiểm tra kết nối mạng và thử lại.',
-          [{ text: 'OK' }]
-        );
-      }
-    } finally {
-      // Đảm bảo luôn tắt loading state
-      if (isMounted.current) {
-        setLoading(false);
-      }
-    }
-  };
 
   const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await fetchData();
-    } finally {
-      if (isMounted.current) {
-        setRefreshing(false);
-      }
-    }
-  }, []);
-
-  // Sửa lại hàm fetchStats để xử lý lỗi tốt hơn và có fallback
-  const fetchStats = async () => {
-    try {
-      const activitiesRef = collection(firestore, 'activities');
-      const usersRef = collection(firestore, 'users');
-      
-      const [activitiesSnapshot, usersSnapshot] = await Promise.all([
-        getDocs(activitiesRef),
-        getDocs(usersRef)
-      ]);
-
-      if (!activitiesSnapshot || !usersSnapshot) {
-        throw new Error('Failed to fetch data from Firestore');
-      }
-
-      const totalActivities = activitiesSnapshot.size;
-      const pendingActivities = activitiesSnapshot.docs.filter(doc => doc.data().status === 'pending').length;
-      const approvedActivities = activitiesSnapshot.docs.filter(doc => doc.data().status === 'approved').length;
-      const totalUsers = usersSnapshot.size;
-
-      if (isMounted.current) {
-        const newStats = {
-          totalActivities,
-          pendingActivities,
-          totalUsers,
-          approvedActivities,
-        };
-        
-        setStats(newStats);
-        setChartData([
-          {
-            name: 'Đã duyệt',
-            population: approvedActivities,
-            color: '#4CAF50',
-            legendFontColor: '#7F7F7F',
-            legendFontSize: 13,
-          },
-          {
-            name: 'Chờ duyệt',
-            population: pendingActivities,
-            color: '#FFC107',
-            legendFontColor: '#7F7F7F',
-            legendFontSize: 13,
-          },
-        ]);
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard stats:', error);
-      throw error;
-    }
-  };
-
-  // Sửa lại hàm fetchFeaturedActivities để xử lý lỗi tốt hơn
-  const fetchFeaturedActivities = useCallback(async () => {
-    try {
-      const activitiesRef = collection(firestore, 'activities');
-      const activitiesQuery = query(
-        activitiesRef,
-        orderBy('participants', 'desc'),
-        limit(10)
-      );
-      
-      const snapshot = await getDocs(activitiesQuery);
-      const featuredActivitiesData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as (ActivityData & { id: string })[];
-
-      if (isMounted.current) {
-        itemAnimations.current = [];
-        setFeaturedActivities(featuredActivitiesData);
-        setFilteredActivities(featuredActivitiesData);
-      }
-    } catch (error) {
-      console.error('Error fetching featured activities:', error);
-      throw error;
-    }
-  }, []);
-
-  // Fix: Replace router.events.on with useFocusEffect from expo-router
-  useFocusEffect(
-    useCallback(() => {
-      // This runs when the screen is focused
-      fetchData();
-      
-      // Return a cleanup function
-      return () => {
-        // This runs when the screen is unfocused
-      };
-    }, [])
-  );
+    await refetch();
+  }, [refetch]);
 
   const handleSearch = (text: string) => {
     setSearchQuery(text);
@@ -415,8 +144,6 @@ export default function AdminDashboard() {
           text: 'Đăng xuất',
           onPress: async () => {
             try {
-              setLoading(true);
-              
               await AsyncStorage.multiRemove([
                 '@admin_session',
                 '@admin_settings',
@@ -426,7 +153,6 @@ export default function AdminDashboard() {
 
               await signOut(auth);
               router.replace('/(auth)/login');
-
             } catch (error) {
               console.error('Lỗi trong quá trình đăng xuất:', error);
               Alert.alert(
@@ -434,8 +160,6 @@ export default function AdminDashboard() {
                 'Không thể đăng xuất. Vui lòng thử lại.',
                 [{ text: 'OK' }]
               );
-            } finally {
-              setLoading(false);
             }
           },
           style: 'destructive'
@@ -448,66 +172,6 @@ export default function AdminDashboard() {
     router.push("./HoatDong");
   };
 
-  // Sửa lại renderFeaturedActivityItem để kiểm tra date
-  const renderFeaturedActivityItem = ({ 
-    item,
-    index 
-  }: { 
-    item: ActivityData & { id: string }; 
-    index: number 
-  }) => {
-    const isApproved = item.status === 'approved';
-    const formattedDate = item.date ? item.date.toDate().toLocaleDateString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    }) : 'Chưa có ngày';
-
-    // Sử dụng animation values đã được tạo trước đó
-    const itemAnim = itemAnimations.current[index] || { fade: new Animated.Value(1), translateX: new Animated.Value(0) };
-
-    return (
-      <Animated.View 
-        style={[
-          styles.featuredActivityItem,
-          { 
-            opacity: itemAnim.fade,
-            transform: [{ translateX: itemAnim.translateX }],
-            borderLeftColor: isApproved ? '#4CAF50' : '#FFC107',
-          }
-        ]}
-      >
-        <TouchableOpacity 
-          onPress={() => navigateToActivityDetail(item.id)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.featuredActivityName} numberOfLines={1}>{item.name || 'Không có tiêu đề'}</Text>
-          <View style={styles.activityInfoRow}>
-            <Ionicons name="people-outline" size={16} color="#666" />
-            <Text style={styles.featuredActivityInfo}>{item.participants?.length || 0} người tham gia</Text>
-          </View>
-          <View style={styles.activityInfoRow}>
-            <Ionicons name="calendar-outline" size={16} color="#666" />
-            <Text style={styles.featuredActivityInfo}>{formattedDate}</Text>
-          </View>
-          <View style={styles.activityInfoRow}>
-            <Ionicons name="location-outline" size={16} color="#666" />
-            <Text style={styles.featuredActivityInfo} numberOfLines={1}>{item.location || 'Chưa có địa điểm'}</Text>
-          </View>
-          <View style={styles.statusBadge}>
-            <Text style={[
-              styles.statusText, 
-              { color: isApproved ? '#4CAF50' : '#FFC107' }
-            ]}>
-              {isApproved ? 'Đã duyệt' : 'Chờ duyệt'}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
-
-  // Thêm nút Retry khi có lỗi
   if (error) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -517,7 +181,7 @@ export default function AdminDashboard() {
         <Text style={styles.errorSubText}>{error}</Text>
         <TouchableOpacity 
           style={styles.retryButton}
-          onPress={fetchData}
+          onPress={refetch}
         >
           <Text style={styles.retryButtonText}>Thử lại</Text>
         </TouchableOpacity>
@@ -525,24 +189,16 @@ export default function AdminDashboard() {
     );
   }
 
-  // Thêm nút Skip loading để người dùng có thể bỏ qua màn hình loading
-  if (loading && !refreshing) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
-        <TouchableOpacity 
-          style={styles.skipButton}
-          onPress={() => setLoading(false)}
-        >
-          <Text style={styles.skipButtonText}>Bỏ qua</Text>
-        </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
-  // Phần còn lại của component giữ nguyên
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
@@ -607,7 +263,7 @@ export default function AdminDashboard() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
+            refreshing={loading}
             onRefresh={onRefresh}
             colors={['#007AFF']}
             tintColor="#007AFF"
@@ -722,7 +378,14 @@ export default function AdminDashboard() {
           {filteredActivities.length > 0 ? (
             <FlatList
               data={filteredActivities}
-              renderItem={renderFeaturedActivityItem}
+              renderItem={({ item, index }) => (
+                <FeaturedActivityItem
+                  item={item}
+                  index={index}
+                  onPress={() => navigateToActivityDetail(item.id)}
+                  itemAnimations={itemAnimations.current}
+                />
+              )}
               keyExtractor={(item) => item.id}
               horizontal={true}
               showsHorizontalScrollIndicator={false}
@@ -852,18 +515,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
   },
-  skipButton: {
-    marginTop: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-    borderRadius: 8,
-  },
-  skipButtonText: {
-    color: '#007AFF',
-    fontWeight: 'bold',
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -927,36 +578,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
   },
-  statItem: {
-    width: '48%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  statIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
   chartsContainer: {
     backgroundColor: '#fff',
     padding: 16,
@@ -1003,46 +624,15 @@ const styles = StyleSheet.create({
   featuredActivitiesList: {
     paddingVertical: 8,
   },
-  featuredActivityItem: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
-    marginRight: 16,
-    width: 250,
-    borderLeftWidth: 4,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  featuredActivityName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    color: '#333',
-  },
-  activityInfoRow: {
-    flexDirection: 'row',
+  noDataContainer: {
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'center',
+    padding: 24,
   },
-  featuredActivityInfo: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 4,
-  },
-  statusBadge: {
+  noDataText: {
     marginTop: 8,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: '#f0f0f0',
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#999',
   },
   quickActionsContainer: {
     padding: 16,
@@ -1061,38 +651,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginTop: 16,
-  },
-  dashboardButtonContainer: {
-    width: '48%',
-    marginBottom: 16,
-  },
-  dashboardButton: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderLeftWidth: 4,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  dashboardButtonText: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  noDataContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  noDataText: {
-    marginTop: 8,
-    fontSize: 16,
-    color: '#999',
   },
   footer: {
     padding: 16,

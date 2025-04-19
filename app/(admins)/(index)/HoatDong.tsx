@@ -1,66 +1,50 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ActivityIndicator, SafeAreaView, StatusBar } from 'react-native';
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
-import { useActivity } from './ActivityContext';
+import { getAuth } from '@react-native-firebase/auth';
+import { getFirestore, collection, query, where, orderBy, getDocs, doc, updateDoc, Timestamp, getDoc } from '@react-native-firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../../context/ThemeContext';
 
 interface Activity {
   id: string;
   name: string;
   description?: string;
-  startDate: FirebaseFirestoreTypes.Timestamp;
-  endDate: FirebaseFirestoreTypes.Timestamp;
+  startDate: Timestamp;
+  endDate: Timestamp;
   isHidden?: boolean;
   participants?: string[];
   pendingParticipants?: string[];
   status: 'pending' | 'approved' | 'rejected';
 }
 
-interface UserData {
-  role: string;
-  [key: string]: any;
-}
-
 const HoatDong = () => {
   const router = useRouter();
-  const { activities, updateActivities } = useActivity();
+  const { theme, isDarkMode } = useTheme();
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [userRole, setUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [localActivities, setLocalActivities] = useState<Activity[]>([]);
 
   useEffect(() => {
-    const fetchUserRole = async () => {
-      const user = auth().currentUser;
-      if (user) {
-        const userDoc = await firestore().collection('users').doc(user.uid).get();
-        const userData = userDoc.data() as UserData | undefined;
-        if (userData) {
-          setUserRole(userData.role);
-        }
-      }
-    };
-
-    fetchUserRole();
     fetchActivities();
   }, []);
 
   const fetchActivities = async () => {
     setLoading(true);
     try {
-      const now = firestore.Timestamp.fromDate(new Date());
+      const db = getFirestore();
+      const now = Timestamp.fromDate(new Date());
       console.log('Current time:', now.toDate());
 
-      const activitiesSnapshot = await firestore()
-        .collection('activities')
-        .where('status', '==', 'approved')
-        .where('endDate', '>=', now)
-        .orderBy('endDate', 'asc')
-        .get();
+      const activitiesQuery = query(
+        collection(db, 'activities'),
+        where('status', '==', 'approved'),
+        where('endDate', '>=', now),
+        orderBy('endDate', 'asc')
+      );
 
+      const activitiesSnapshot = await getDocs(activitiesQuery);
       console.log('Query snapshot:', activitiesSnapshot.size);
 
       const activitiesList = activitiesSnapshot.docs
@@ -89,12 +73,14 @@ const HoatDong = () => {
 
   const handleRegister = async () => {
     if (selectedActivity) {
-      const user = auth().currentUser;
+      const auth = getAuth();
+      const user = auth.currentUser;
       if (user) {
         try {
-          const activityRef = firestore().collection('activities').doc(selectedActivity.id);
+          const db = getFirestore();
+          const activityRef = doc(db, 'activities', selectedActivity.id);
           
-          const activityDoc = await activityRef.get();
+          const activityDoc = await getDoc(activityRef);
           const activityData = activityDoc.data() as Activity | undefined;
           
           if (activityData?.participants?.includes(user.uid)) {
@@ -107,8 +93,8 @@ const HoatDong = () => {
             return;
           }
           
-          await activityRef.update({
-            pendingParticipants: firestore.FieldValue.arrayUnion(user.uid)
+          await updateDoc(activityRef, {
+            pendingParticipants: [...(activityData?.pendingParticipants || []), user.uid]
           });
           
           alert('Đăng ký thành công! Vui lòng chờ phê duyệt.');
@@ -121,7 +107,7 @@ const HoatDong = () => {
     }
   };
 
-  const formatDate = (date: FirebaseFirestoreTypes.Timestamp | undefined) => {
+  const formatDate = (date: Timestamp | undefined) => {
     if (!date) return 'N/A';
     try {
       return date.toDate().toLocaleDateString();
@@ -134,42 +120,187 @@ const HoatDong = () => {
     if (!item) return null;
 
     return (
-      <TouchableOpacity style={styles.activityItem} onPress={() => handleActivityPress(item)}>
+      <TouchableOpacity 
+        style={[styles.activityItem, { backgroundColor: theme.colors.surface }]} 
+        onPress={() => handleActivityPress(item)}
+      >
         <View style={styles.activityContent}>
-          <Text style={styles.activityName}>{item.name || 'Unnamed Activity'}</Text>
+          <Text style={[styles.activityName, { color: theme.colors.text }]}>{item.name || 'Unnamed Activity'}</Text>
           <View style={styles.activityDetails}>
-            <Ionicons name="calendar-outline" size={16} color="#666" />
-            <Text style={styles.activityDate}>
+            <Ionicons name="calendar-outline" size={16} color={theme.colors.primary} />
+            <Text style={[styles.activityDate, { color: theme.colors.text }]}>
               {formatDate(item.startDate)}
             </Text>
           </View>
           <View style={styles.activityDetails}>
-            <Ionicons name="time-outline" size={16} color="#666" />
-            <Text style={styles.activityDate}>
+            <Ionicons name="time-outline" size={16} color={theme.colors.primary} />
+            <Text style={[styles.activityDate, { color: theme.colors.text }]}>
               {formatDate(item.endDate)}
             </Text>
           </View>
         </View>
-        <Ionicons name="chevron-forward-outline" size={24} color="#007AFF" />
+        <Ionicons name="chevron-forward-outline" size={24} color={theme.colors.primary} />
       </TouchableOpacity>
     );
   };
 
+  const styles = StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    container: {
+      flex: 1,
+      padding: 20,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    refreshButton: {
+      padding: 5,
+    },
+    listContainer: {
+      paddingBottom: 20,
+    },
+    activityItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 15,
+      padding: 15,
+      borderRadius: 12,
+      shadowColor: isDarkMode ? '#000' : '#000',
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+      shadowOpacity: isDarkMode ? 0.3 : 0.1,
+      shadowRadius: 3.84,
+      elevation: 5,
+    },
+    activityContent: {
+      flex: 1,
+    },
+    activityName: {
+      fontSize: 18,
+      fontWeight: '600',
+      marginBottom: 5,
+    },
+    activityDetails: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 5,
+    },
+    activityDate: {
+      fontSize: 14,
+      marginLeft: 5,
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    noActivitiesText: {
+      fontSize: 18,
+      color: theme.colors.text,
+      marginTop: 10,
+    },
+    modalOverlay: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    modalView: {
+      width: '90%',
+      backgroundColor: theme.colors.surface,
+      borderRadius: 20,
+      padding: 35,
+      alignItems: "center",
+      shadowColor: "#000",
+      shadowOffset: {
+        width: 0,
+        height: 2
+      },
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      elevation: 5
+    },
+    modalTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+      marginBottom: 15,
+    },
+    modalDescription: {
+      fontSize: 16,
+      color: theme.colors.text,
+      marginBottom: 20,
+      textAlign: 'center',
+    },
+    modalDetails: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    modalDetailText: {
+      fontSize: 16,
+      color: theme.colors.text,
+      marginLeft: 10,
+    },
+    registerButton: {
+      backgroundColor: theme.colors.primary,
+      borderRadius: 12,
+      padding: 15,
+      width: '100%',
+      alignItems: 'center',
+      marginTop: 20,
+    },
+    registerButtonText: {
+      color: '#FFFFFF',
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    closeButton: {
+      marginTop: 15,
+      padding: 10,
+    },
+    closeButtonText: {
+      color: theme.colors.primary,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    backButton: {
+      padding: 10,
+    },
+  });
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F0F0F5" />
+      <StatusBar 
+        barStyle={isDarkMode ? "light-content" : "dark-content"} 
+        backgroundColor={theme.colors.background} 
+      />
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+            <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
           </TouchableOpacity>
           <Text style={styles.title}>Đang diễn ra</Text>
           <TouchableOpacity onPress={fetchActivities} style={styles.refreshButton}>
-            <Ionicons name="refresh-outline" size={24} color="#007AFF" />
+            <Ionicons name="refresh-outline" size={24} color={theme.colors.primary} />
           </TouchableOpacity>
         </View>
         {loading ? (
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color={theme.colors.primary} />
         ) : localActivities.length > 0 ? (
           <FlatList
             data={localActivities}
@@ -181,7 +312,7 @@ const HoatDong = () => {
           />
         ) : (
           <View style={styles.emptyState}>
-            <Ionicons name="calendar-outline" size={64} color="#CCC" />
+            <Ionicons name="calendar-outline" size={64} color={theme.colors.primary} />
             <Text style={styles.noActivitiesText}>Không có hoạt động nào đang diễn ra.</Text>
           </View>
         )}
@@ -199,13 +330,13 @@ const HoatDong = () => {
                 <Text style={styles.modalTitle}>{selectedActivity.name || 'Unnamed Activity'}</Text>
                 <Text style={styles.modalDescription}>{selectedActivity.description || 'No description available'}</Text>
                 <View style={styles.modalDetails}>
-                  <Ionicons name="calendar-outline" size={20} color="#666" />
+                  <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
                   <Text style={styles.modalDetailText}>
                     Bắt đầu: {formatDate(selectedActivity.startDate)}
                   </Text>
                 </View>
                 <View style={styles.modalDetails}>
-                  <Ionicons name="time-outline" size={20} color="#666" />
+                  <Ionicons name="time-outline" size={20} color={theme.colors.primary} />
                   <Text style={styles.modalDetailText}>
                     Kết thúc: {formatDate(selectedActivity.endDate)}
                   </Text>
@@ -224,147 +355,5 @@ const HoatDong = () => {
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F0F0F5',
-  },
-  container: {
-    flex: 1,
-    padding: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  refreshButton: {
-    padding: 5,
-  },
-  listContainer: {
-    paddingBottom: 20,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-    padding: 15,
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  activityContent: {
-    flex: 1,
-  },
-  activityName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 5,
-  },
-  activityDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 5,
-  },
-  activityDate: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 5,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  noActivitiesText: {
-    fontSize: 18,
-    color: '#666',
-    marginTop: 10,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalView: {
-    width: '90%',
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 35,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 15,
-  },
-  modalDescription: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  modalDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  modalDetailText: {
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 10,
-  },
-  registerButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: 15,
-    width: '100%',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  registerButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  closeButton: {
-    marginTop: 15,
-    padding: 10,
-  },
-  closeButtonText: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  backButton: {
-    padding: 10,
-  },
-});
 
 export default HoatDong;

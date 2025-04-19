@@ -1,3 +1,4 @@
+import React from "react"
 import { useState, useEffect, useRef } from "react"
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Animated, Dimensions,
   KeyboardAvoidingView, Platform, StatusBar, Keyboard, ActivityIndicator, TouchableWithoutFeedback, Pressable,
@@ -26,6 +27,8 @@ import * as Haptics from "expo-haptics"
 import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from "expo-router"
 import { useAuth } from "../_layout"
+import * as LocalAuthentication from 'expo-local-authentication'
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
 // Initialize Firebase services
 const auth = getAuth()
@@ -46,6 +49,8 @@ export default function Login() {
   const [passwordFocused, setPasswordFocused] = useState(false)
   const [emailError, setEmailError] = useState("")
   const [passwordError, setPasswordError] = useState("")
+  const [isBiometricSupported, setIsBiometricSupported] = useState(false)
+  const [showBiometric, setShowBiometric] = useState(false)
 
   // Animations
   const fadeAnim = useState(new Animated.Value(0))[0]
@@ -209,6 +214,14 @@ export default function Login() {
       // Save user data to Firestore
       await saveUserToFirestore(userCredential.user)
 
+      // If biometric is supported, save credentials
+      if (isBiometricSupported) {
+        // For Google sign-in, we'll use the email and a special token
+        await AsyncStorage.setItem('userEmail', userCredential.user.email || '')
+        await AsyncStorage.setItem('userPassword', 'google_sign_in')
+        setShowBiometric(true)
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
       // Use the new routing function
@@ -242,16 +255,19 @@ export default function Login() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
       const userCredential = await signInWithEmailAndPassword(auth, email, password)
-      console.log("Signed in with email and password!")
+      
+      // If login successful, save credentials for biometric login
+      if (isBiometricSupported) {
+        await AsyncStorage.setItem('userEmail', email)
+        await AsyncStorage.setItem('userPassword', password)
+        setShowBiometric(true)
+      }
 
-      // Save user data to Firestore
       await saveUserToFirestore(userCredential.user)
-
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
-      // Use the new routing function
       if (userCredential.user.email) {
-        handleRouting(userCredential.user.email);
+        handleRouting(userCredential.user.email)
       }
     } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
@@ -307,8 +323,43 @@ export default function Login() {
   }
 
   const handleBiometricAuth = async () => {
-    // This is a placeholder for biometric authentication
-    Alert.alert("Biometric Authentication", "Biometric authentication would be triggered here")
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Đăng nhập bằng sinh trắc học',
+        disableDeviceFallback: false,
+        cancelLabel: 'Hủy',
+      })
+
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        
+        const savedEmail = await AsyncStorage.getItem('userEmail')
+        const savedPassword = await AsyncStorage.getItem('userPassword')
+        
+        if (savedEmail && savedPassword) {
+          setLoading(true)
+          
+          if (savedPassword === 'google_sign_in') {
+            // Handle Google sign-in
+            await onGoogleButtonPress()
+          } else {
+            // Handle email/password sign-in
+            const userCredential = await signInWithEmailAndPassword(auth, savedEmail, savedPassword)
+            await saveUserToFirestore(userCredential.user)
+            
+            if (userCredential.user.email) {
+              handleRouting(userCredential.user.email)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Biometric authentication error:', error)
+      Alert.alert('Lỗi', 'Không thể xác thực sinh trắc học. Vui lòng thử lại.')
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Hiệu ứng xoay cho loading spinner
@@ -316,6 +367,43 @@ export default function Login() {
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg']
   });
+
+  useEffect(() => {
+    checkBiometricAvailability()
+  }, [])
+
+  const checkBiometricAvailability = async () => {
+    try {
+      const compatible = await LocalAuthentication.hasHardwareAsync()
+      console.log('Biometric hardware available:', compatible)
+      setIsBiometricSupported(compatible)
+
+      if (!compatible) {
+        console.log('Biometric hardware not available')
+        return
+      }
+
+      const enrolled = await LocalAuthentication.isEnrolledAsync()
+      console.log('Biometric enrolled:', enrolled)
+
+      if (!enrolled) {
+        console.log('No biometrics enrolled')
+        return
+      }
+
+      // Check for saved credentials
+      const savedEmail = await AsyncStorage.getItem('userEmail')
+      const savedPassword = await AsyncStorage.getItem('userPassword')
+      
+      console.log('Has saved credentials:', !!savedEmail && !!savedPassword)
+      
+      if (savedEmail && savedPassword) {
+        setShowBiometric(true)
+      }
+    } catch (error) {
+      console.error('Error checking biometric availability:', error)
+    }
+  }
 
   return (
     <KeyboardAvoidingView
@@ -433,6 +521,17 @@ export default function Login() {
               <Text style={styles.forgotPasswordText}>Quên mật khẩu</Text>
             </TouchableOpacity>
 
+            {isBiometricSupported && showBiometric && (
+              <TouchableOpacity
+                style={[styles.biometricButton, { marginBottom: 16 }]}
+                onPress={handleBiometricAuth}
+                disabled={loading}
+              >
+                <Ionicons name="finger-print" size={24} color="#FFFFFF" />
+                <Text style={styles.biometricButtonText}>Đăng nhập bằng sinh trắc học</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               style={[styles.signInButton, loading && styles.buttonLoading]}
               onPress={signInWithEmail}
@@ -450,13 +549,6 @@ export default function Login() {
                 <Text style={styles.signInButtonText}>Sign In</Text>
               )}
             </TouchableOpacity>
-
-            <View style={styles.biometricContainer}>
-              <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricAuth}>
-                <Ionicons name="finger-print-outline" size={28} color="#6C5CE7" />
-                <Text style={styles.biometricText}>SINH TRẮC HỌC</Text>
-              </TouchableOpacity>
-            </View>
 
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
@@ -632,16 +724,25 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   biometricButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#6C5CE7',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginVertical: 16,
+    shadowColor: "#6C5CE7",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  biometricText: {
-    color: "#6C5CE7",
-    fontSize: 14,
-    fontWeight: "600",
-    marginLeft: 8,
+  biometricButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 12,
   },
   divider: {
     flexDirection: "row",

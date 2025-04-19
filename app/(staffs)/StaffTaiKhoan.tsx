@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Switch,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -21,6 +22,7 @@ import * as ImagePicker from "expo-image-picker"
 import { useRouter } from "expo-router"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { GoogleSignin } from "@react-native-google-signin/google-signin"
+import * as LocalAuthentication from 'expo-local-authentication'
 
 interface UserProfile {
   displayName: string
@@ -28,6 +30,7 @@ interface UserProfile {
   photoURL: string
   phoneNumber: string
   department: string
+  biometricEnabled?: boolean
 }
 
 const StaffTaiKhoan = () => {
@@ -41,9 +44,13 @@ const StaffTaiKhoan = () => {
   const [error, setError] = useState<string | null>(null)
   const auth = getAuth()
   const db = getFirestore()
+  const [isBiometricSupported, setIsBiometricSupported] = useState(false)
+  const [isBiometricEnabled, setIsBiometricEnabled] = useState(false)
 
   useEffect(() => {
     fetchUserData()
+    checkBiometricSupport()
+    loadBiometricSettings()
   }, [])
 
   const fetchUserData = async () => {
@@ -65,6 +72,7 @@ const StaffTaiKhoan = () => {
           photoURL: userData.photoURL || currentUser.photoURL || "",
           phoneNumber: userData.phoneNumber || currentUser.phoneNumber || "",
           department: userData.department || "",
+          biometricEnabled: userData.biometricEnabled || false,
         })
         setUpdatedUser({})
       } else {
@@ -74,6 +82,7 @@ const StaffTaiKhoan = () => {
           photoURL: currentUser.photoURL || "",
           phoneNumber: currentUser.phoneNumber || "",
           department: "",
+          biometricEnabled: false,
         }
         setUser(defaultProfile)
         await updateDoc(doc(db, "users", currentUser.uid), defaultProfile as { [x: string]: any })
@@ -191,15 +200,94 @@ const StaffTaiKhoan = () => {
             await auth.signOut()
 
             // Navigate to login screen
-            router.replace("/(auth)/login")
+              router.replace("/(auth)/login")
           } catch (error) {
             console.error("Error during logout:", error)
             Alert.alert("Lỗi đăng xuất", "Không thể đăng xuất hoàn toàn. Vui lòng thử lại.", [{ text: "OK" }])
-          }
+            }
+          },
         },
-      },
     ])
   }
+
+  const checkBiometricSupport = async () => {
+    const compatible = await LocalAuthentication.hasHardwareAsync()
+    setIsBiometricSupported(compatible)
+  }
+
+  const loadBiometricSettings = async () => {
+    try {
+      const enabled = await AsyncStorage.getItem('biometricEnabled')
+      setIsBiometricEnabled(enabled === 'true')
+    } catch (error) {
+      console.error('Error loading biometric settings:', error)
+    }
+  }
+
+  const toggleBiometric = async () => {
+    try {
+      if (!isBiometricSupported) {
+        Alert.alert('Không hỗ trợ', 'Thiết bị của bạn không hỗ trợ sinh trắc học')
+        return
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Xác thực sinh trắc học',
+        disableDeviceFallback: false,
+        cancelLabel: 'Hủy',
+      })
+
+      if (result.success) {
+        const newValue = !isBiometricEnabled
+        await AsyncStorage.setItem('biometricEnabled', String(newValue))
+        setIsBiometricEnabled(newValue)
+
+        // Update user profile in Firestore
+        const currentUser = auth.currentUser
+        if (currentUser) {
+          await updateDoc(doc(db, "users", currentUser.uid), {
+            biometricEnabled: newValue,
+          } as { [x: string]: any })
+        }
+
+        Alert.alert(
+          'Thành công',
+          newValue 
+            ? 'Đã bật đăng nhập bằng sinh trắc học' 
+            : 'Đã tắt đăng nhập bằng sinh trắc học'
+        )
+      }
+    } catch (error) {
+      console.error('Error toggling biometric:', error)
+      Alert.alert('Lỗi', 'Không thể thay đổi cài đặt sinh trắc học')
+    }
+  }
+
+  const renderBiometricSection = () => (
+    <View style={styles.infoSection}>
+      <View style={styles.biometricRow}>
+        <View style={styles.biometricInfo}>
+          <Ionicons name="finger-print-outline" size={24} color="#007AFF" />
+          <View style={styles.biometricTextContainer}>
+            <Text style={styles.biometricTitle}>Đăng nhập sinh trắc học</Text>
+            <Text style={styles.biometricDescription}>
+              {isBiometricSupported 
+                ? 'Sử dụng vân tay hoặc Face ID để đăng nhập' 
+                : 'Thiết bị không hỗ trợ sinh trắc học'}
+            </Text>
+          </View>
+        </View>
+        {isBiometricSupported && (
+          <Switch
+            value={isBiometricEnabled}
+            onValueChange={toggleBiometric}
+            trackColor={{ false: "#D1D1D6", true: "#4CD964" }}
+            thumbColor="#FFFFFF"
+          />
+        )}
+      </View>
+    </View>
+  )
 
   if (loading) {
     return (
@@ -281,35 +369,37 @@ const StaffTaiKhoan = () => {
         <View style={styles.infoSection}>
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Số điện thoại</Text>
-            {editMode ? (
-              <TextInput
+          {editMode ? (
+            <TextInput
                 style={styles.infoInput}
                 value={updatedUser.phoneNumber ?? user?.phoneNumber}
                 onChangeText={(text) => setUpdatedUser({ ...updatedUser, phoneNumber: text })}
                 placeholder="Nhập số điện thoại"
-                placeholderTextColor="#999"
+              placeholderTextColor="#999"
                 keyboardType="phone-pad"
-              />
-            ) : (
+            />
+          ) : (
               <Text style={styles.infoValue}>{user?.phoneNumber || "Chưa cập nhật"}</Text>
-            )}
-          </View>
+          )}
+        </View>
 
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Phòng/Ban</Text>
-            {editMode ? (
-              <TextInput
+          {editMode ? (
+            <TextInput
                 style={styles.infoInput}
                 value={updatedUser.department ?? user?.department}
-                onChangeText={(text) => setUpdatedUser({ ...updatedUser, department: text })}
+              onChangeText={(text) => setUpdatedUser({ ...updatedUser, department: text })}
                 placeholder="Nhập phòng/ban"
-                placeholderTextColor="#999"
-              />
-            ) : (
+              placeholderTextColor="#999"
+            />
+          ) : (
               <Text style={styles.infoValue}>{user?.department || "Chưa cập nhật"}</Text>
-            )}
-          </View>
+          )}
         </View>
+        </View>
+
+        {renderBiometricSection()}
 
         {editMode ? (
           <View style={styles.editActions}>
@@ -346,8 +436,8 @@ const StaffTaiKhoan = () => {
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
           <Text style={styles.logoutButtonText}>Đăng xuất</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          </TouchableOpacity>
+        </ScrollView>
     </KeyboardAvoidingView>
   )
 }
@@ -577,6 +667,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     marginLeft: 8,
+  },
+  biometricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  biometricInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  biometricTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  biometricTitle: {
+    fontSize: 16,
+    color: '#1A2138',
+    fontWeight: '600',
+  },
+  biometricDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
   },
 })
 

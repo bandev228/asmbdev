@@ -1,5 +1,3 @@
-"use client"
-
 import { useEffect, useState, createContext, useContext } from "react"
 import { Stack, Redirect } from "expo-router"
 import { View, ActivityIndicator, StyleSheet, Platform } from "react-native"
