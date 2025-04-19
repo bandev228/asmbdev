@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, FlatList, TextInput, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, FlatList, TextInput, Platform, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getFirestore, collection, query, where, getDocs, Timestamp } from '@react-native-firebase/firestore';
@@ -182,59 +182,123 @@ const BaoCaoHoatDong = () => {
     }
   };
 
-  const renderActivityItem = ({ item }: { item: Activity }) => (
-    <View style={styles.activityItem}>
-      <Text style={styles.activityName}>{item.name}</Text>
-      <Text style={styles.activityInfo}>
-        Ngày tạo: {item.createdAt.toDate().toLocaleDateString()}
-      </Text>
-      <Text style={styles.activityInfo}>
-        Trạng thái: {item.status}
-      </Text>
-      <Text style={styles.activityInfo}>
-        Số người tham gia: {item.participants?.length || 0}
-      </Text>
-      <View style={styles.actionButtons}>
-        <TouchableOpacity 
-          style={styles.exportParticipantsButton}
-          onPress={() => exportParticipantsList(item)}
-        >
-          <Ionicons name="people-outline" size={screenWidth * 0.045} color="#007AFF" />
-          <Text style={styles.exportParticipantsText}>Xuất DS sinh viên</Text>
-        </TouchableOpacity>
+  const renderActivityItem = ({ item }: { item: Activity }) => {
+    const getStatusColor = (status: string) => {
+      switch (status) {
+        case 'completed':
+          return '#4CAF50';
+        case 'pending':
+          return '#FF9800';
+        case 'cancelled':
+          return '#F44336';
+        default:
+          return '#666666';
+      }
+    };
+
+    const getStatusText = (status: string) => {
+      switch (status) {
+        case 'completed':
+          return 'Hoàn thành';
+        case 'pending':
+          return 'Đang chờ';
+        case 'cancelled':
+          return 'Đã hủy';
+        default:
+          return 'Không xác định';
+      }
+    };
+
+    return (
+      <View style={styles.activityItem}>
+        <View style={styles.activityHeader}>
+          <View style={styles.activityTitleContainer}>
+            <Text style={styles.activityName}>{item.name}</Text>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+              <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.activityDetails}>
+          <View style={styles.detailRow}>
+            <Ionicons name="calendar-outline" size={16} color="#666666" />
+            <Text style={styles.detailText}>
+              Ngày tạo: {item.createdAt.toDate().toLocaleDateString('vi-VN')}
+            </Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Ionicons name="location-outline" size={16} color="#666666" />
+            <Text style={styles.detailText}>
+              Địa điểm: {item.location || 'Chưa cập nhật'}
+            </Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Ionicons name="people-outline" size={16} color="#666666" />
+            <Text style={styles.detailText}>
+              Số người tham gia: {item.participants?.length || 0} người
+            </Text>
+          </View>
+          {item.startDate && item.endDate && (
+            <View style={styles.timelineContainer}>
+              <View style={styles.detailRow}>
+                <Ionicons name="time-outline" size={16} color="#666666" />
+                <Text style={styles.detailText}>
+                  Bắt đầu: {item.startDate.toDate().toLocaleString('vi-VN')}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Ionicons name="time-outline" size={16} color="#666666" />
+                <Text style={styles.detailText}>
+                  Kết thúc: {item.endDate.toDate().toLocaleString('vi-VN')}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
+            style={styles.exportParticipantsButton}
+            onPress={() => exportParticipantsList(item)}
+          >
+            <Ionicons name="people-outline" size={20} color="#FFFFFF" />
+            <Text style={styles.exportParticipantsText}>Xuất danh sách sinh viên</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity 
-            onPress={() => router.back()} 
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#007AFF" />
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#007AFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Báo cáo hoạt động</Text>
-          <TouchableOpacity 
-            onPress={exportToExcel} 
-            style={styles.exportButton}
-          >
-            <Ionicons name="download-outline" size={screenWidth * 0.06} color="#007AFF" />
+          <TouchableOpacity onPress={exportToExcel} style={styles.exportButton}>
+            <Ionicons name="download-outline" size={24} color="#007AFF" />
           </TouchableOpacity>
         </View>
 
         <View style={styles.filterContainer}>
-          <TouchableOpacity 
-            style={styles.datePickerButton} 
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Ionicons name="calendar-outline" size={screenWidth * 0.05} color="#666666" />
-            <Text style={styles.dateText}>
-              {selectedDate.toLocaleDateString()}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.datePickerRow}>
+            <TouchableOpacity 
+              style={styles.datePickerButton} 
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Ionicons name="calendar-outline" size={20} color="#666666" />
+              <Text style={styles.dateText}>{selectedDate.toLocaleDateString('vi-VN')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.refreshButton}
+              onPress={fetchActivities}
+            >
+              <Ionicons name="refresh-outline" size={20} color="#666666" />
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.filterButtons}>
             <TouchableOpacity 
@@ -258,28 +322,51 @@ const BaoCaoHoatDong = () => {
               onPress={() => setFilterType('completed')}
             >
               <Text style={[styles.filterButtonText, filterType === 'completed' && styles.filterButtonTextActive]}>
-                Đã hoàn thành
+                Hoàn thành
               </Text>
             </TouchableOpacity>
           </View>
 
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Tìm kiếm hoạt động..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
+          <View style={styles.searchContainer}>
+            <Ionicons name="search-outline" size={20} color="#666666" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Tìm kiếm hoạt động..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#999999"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#666666" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        <FlatList
-          data={activities.filter(activity => 
-            activity.name.toLowerCase().includes(searchQuery.toLowerCase())
-          )}
-          renderItem={renderActivityItem}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#007AFF" />
+          </View>
+        ) : (
+          <FlatList
+            data={activities.filter(activity => 
+              activity.name.toLowerCase().includes(searchQuery.toLowerCase())
+            )}
+            renderItem={renderActivityItem}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="document-text-outline" size={48} color="#CCCCCC" />
+                <Text style={styles.emptyText}>
+                  {searchQuery ? 'Không tìm thấy hoạt động' : 'Chưa có hoạt động nào'}
+                </Text>
+              </View>
+            }
+          />
+        )}
 
         {showDatePicker && (
           <DateTimePicker
@@ -311,54 +398,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: screenWidth * 0.04,
-    paddingVertical: screenWidth * 0.03,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
   },
   headerTitle: {
-    fontSize: screenWidth * 0.055,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333333',
     flex: 1,
     textAlign: 'center',
   },
   backButton: {
-    padding: screenWidth * 0.02,
-    marginRight: screenWidth * 0.02,
+    padding: 8,
   },
   exportButton: {
-    padding: screenWidth * 0.02,
-    marginLeft: screenWidth * 0.02,
+    padding: 8,
   },
   filterContainer: {
     backgroundColor: '#FFFFFF',
-    padding: screenWidth * 0.04,
+    padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
   },
+  datePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   datePickerButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F0F0F5',
-    padding: screenWidth * 0.03,
+    padding: 12,
     borderRadius: 8,
-    marginBottom: screenWidth * 0.03,
+    marginRight: 8,
+  },
+  refreshButton: {
+    padding: 12,
+    backgroundColor: '#F0F0F5',
+    borderRadius: 8,
   },
   dateText: {
-    marginLeft: screenWidth * 0.02,
-    fontSize: screenWidth * 0.04,
+    marginLeft: 8,
+    fontSize: 16,
     color: '#333333',
   },
   filterButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: screenWidth * 0.03,
+    marginBottom: 12,
   },
   filterButton: {
     flex: 1,
-    padding: screenWidth * 0.02,
-    marginHorizontal: screenWidth * 0.01,
+    padding: 8,
+    marginHorizontal: 4,
     borderRadius: 8,
     backgroundColor: '#F0F0F5',
     alignItems: 'center',
@@ -367,66 +463,125 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
   },
   filterButtonText: {
-    fontSize: screenWidth * 0.035,
+    fontSize: 14,
     color: '#666666',
   },
   filterButtonTextActive: {
     color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F0F5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
   },
   searchInput: {
-    backgroundColor: '#F0F0F5',
-    padding: screenWidth * 0.03,
-    borderRadius: 8,
-    fontSize: screenWidth * 0.04,
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    fontSize: 16,
+    color: '#333333',
   },
   listContent: {
-    padding: screenWidth * 0.04,
+    padding: 16,
   },
   activityItem: {
     backgroundColor: '#FFFFFF',
-    padding: screenWidth * 0.04,
-    marginBottom: screenHeight * 0.015,
     borderRadius: 12,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  activityHeader: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F5',
+  },
+  activityTitleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   activityName: {
-    fontSize: screenWidth * 0.045,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333333',
-    marginBottom: screenHeight * 0.01,
+    flex: 1,
   },
-  activityInfo: {
-    fontSize: screenWidth * 0.04,
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  statusText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  activityDetails: {
+    padding: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  detailText: {
+    fontSize: 14,
     color: '#666666',
-    marginBottom: screenHeight * 0.005,
+    marginLeft: 8,
+  },
+  timelineContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F5',
   },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: screenHeight * 0.01,
+    padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    paddingTop: screenHeight * 0.01,
+    borderTopColor: '#F0F0F5',
   },
   exportParticipantsButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F0F5',
-    padding: screenWidth * 0.02,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
   },
   exportParticipantsText: {
-    marginLeft: screenWidth * 0.02,
-    fontSize: screenWidth * 0.035,
-    color: '#007AFF',
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#FFFFFF',
     fontWeight: '500',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666666',
+    marginTop: 16,
   },
 });
 
