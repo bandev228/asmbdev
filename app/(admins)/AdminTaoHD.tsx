@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from "react"
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Animated,
-} from "react-native"
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Animated, Image, Modal, Pressable } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import firestore, { FirebaseFirestoreTypes } from "@react-native-firebase/firestore"
-import auth from "@react-native-firebase/auth"
+import { getFirestore, collection, addDoc, Timestamp, serverTimestamp } from "@react-native-firebase/firestore"
+import { getAuth } from "@react-native-firebase/auth"
 import DateTimePicker from "@react-native-community/datetimepicker"
 import { useActivity } from "./(index)/ActivityContext"
 import * as Location from "expo-location"
+import * as ImagePicker from "expo-image-picker"
+import * as FileSystem from "expo-file-system"
 import { useRouter } from "expo-router"
+import { getStorage, ref, putFile, getDownloadURL } from "@react-native-firebase/storage"
+import * as DocumentPicker from 'expo-document-picker'
 
 interface FormErrors {
   activityName?: string;
@@ -15,6 +18,9 @@ interface FormErrors {
   participantLimit?: string;
   date?: string;
   time?: string;
+  activityType?: string;
+  planFile?: string;
+  points?: string;
 }
 
 interface Coordinates {
@@ -25,20 +31,33 @@ interface Coordinates {
 interface Activity {
   id: string;
   name: string;
-  startDate: FirebaseFirestoreTypes.Timestamp;
-  endDate: FirebaseFirestoreTypes.Timestamp;
+  startDate: Date;
+  endDate: Date;
   notes: string;
   participantLimit: number;
   createdBy: string;
-  createdAt: FirebaseFirestoreTypes.Timestamp;
+  createdAt: Date;
   participants: string[];
   status: 'pending' | 'approved' | 'rejected';
   location: string;
   duration: number;
   coordinates: Coordinates | null;
+  activityType: string;
+  planFileUrl?: string;
+  bannerImageUrl?: string;
+  points: number;
 }
 
-const TaoHD = () => {
+const activityTypes = [
+  { id: 'volunteer', name: 'Tình nguyện' },
+  { id: 'union', name: 'Đoàn Hội' },
+  { id: 'club', name: 'CLB' },
+  { id: 'academic', name: 'Học thuật' },
+  { id: 'softskill', name: 'Kỹ năng mềm' },
+  { id: 'other', name: 'Khác' },
+];
+
+const AdminTaoHoatDong = () => {
   const router = useRouter()
   const { updateActivities } = useActivity()
   const [activityName, setActivityName] = useState("")
@@ -57,26 +76,241 @@ const TaoHD = () => {
   const [locationError, setLocationError] = useState("")
   const [formErrors, setFormErrors] = useState<FormErrors>({})
   const [currentCoordinates, setCurrentCoordinates] = useState<Coordinates | null>(null)
-
-  // Animation values
+  const [activityType, setActivityType] = useState("")
+  const [showTypePicker, setShowTypePicker] = useState(false)
+  const [planFile, setPlanFile] = useState<DocumentPicker.DocumentPickerResult | null>(null)
+  const [bannerImage, setBannerImage] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current
-  const translateY = useRef(new Animated.Value(50)).current
+  const auth = getAuth()
+  const db = getFirestore()
+  const storage = getStorage()
+  const [points, setPoints] = useState("")
 
   useEffect(() => {
-    // Start entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 800,
         useNativeDriver: true,
       }),
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
     ]).start()
   }, [])
+
+  const uploadFile = async (uri: string, path: string) => {
+    try {
+      const storageRef = ref(storage, path);
+      await putFile(storageRef, uri);
+      return await getDownloadURL(storageRef);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      throw error;
+    }
+  };
+
+  const pickPlanFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      });
+      
+      if (result.canceled === false) {
+        setPlanFile(result);
+      }
+    } catch (error) {
+      console.error('Error picking file:', error);
+      Alert.alert('Lỗi', 'Không thể chọn file. Vui lòng thử lại.');
+    }
+  };
+
+  const pickBannerImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+      if (status !== 'granted') {
+        Alert.alert('Cần quyền truy cập', 'Vui lòng cấp quyền truy cập thư viện ảnh để tải lên banner')
+        return
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+      })
+
+      if (!result.canceled) {
+        setBannerImage(result.assets[0].uri)
+      }
+    } catch (error) {
+      console.error('Error picking image:', error)
+      Alert.alert('Lỗi', 'Không thể chọn ảnh. Vui lòng thử lại.')
+    }
+  }
+
+  const validateForm = () => {
+    const errors: FormErrors = {}
+
+    if (!activityName.trim()) {
+      errors.activityName = "Vui lòng nhập tên hoạt động"
+    }
+
+    if (!activityType) {
+      errors.activityType = "Vui lòng chọn loại hoạt động"
+    }
+
+    if (!location.trim()) {
+      errors.location = "Vui lòng nhập địa điểm tổ chức"
+    }
+
+    if (!participantLimit.trim()) {
+      errors.participantLimit = "Vui lòng nhập số lượng tuyển"
+    } else if (isNaN(Number(participantLimit)) || parseInt(participantLimit) <= 0) {
+      errors.participantLimit = "Số lượng tuyển phải là số dương"
+    }
+
+    if (!points.trim()) {
+      errors.points = "Vui lòng nhập điểm quy đổi"
+    } else if (isNaN(Number(points)) || parseFloat(points) < 0) {
+      errors.points = "Điểm quy đổi phải là số không âm"
+    }
+
+    if (startDate > endDate) {
+      errors.date = "Ngày bắt đầu phải trước ngày kết thúc"
+    }
+
+    if (startDate.toDateString() === endDate.toDateString() && startTime.getHours() > endTime.getHours()) {
+      errors.time = "Thời gian bắt đầu phải trước thời gian kết thúc"
+    }
+
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const resetForm = () => {
+    setActivityName("");
+    setStartDate(new Date());
+    setEndDate(new Date(new Date().setDate(new Date().getDate() + 1)));
+    setStartTime(new Date());
+    setEndTime(new Date(new Date().setHours(new Date().getHours() + 2)));
+    setNotes("");
+    setParticipantLimit("");
+    setLocation("");
+    setLocationError("");
+    setFormErrors({});
+    setCurrentCoordinates(null);
+    setActivityType("");
+    setPlanFile(null);
+    setBannerImage(null);
+    setPoints("");
+  };
+
+  const handleCreateActivity = async () => {
+    if (!validateForm()) {
+      Alert.alert("Lỗi", "Vui lòng kiểm tra lại thông tin hoạt động")
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      const user = auth.currentUser
+      if (!user) {
+        Alert.alert("Lỗi", "Bạn phải đăng nhập để tạo hoạt động")
+        setIsLoading(false)
+        return
+      }
+
+      let bannerImageUrl = null;
+      let planFileUrl = null;
+
+      // Upload banner image
+      if (bannerImage) {
+        try {
+          bannerImageUrl = await uploadFile(bannerImage, `activities/${Date.now()}_banner.jpg`);
+        } catch (error) {
+          console.error('Error uploading banner:', error);
+          Alert.alert('Lỗi', 'Không thể tải lên banner. Vui lòng thử lại.');
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Upload plan file
+      if (planFile?.canceled === false) {
+        try {
+          planFileUrl = await uploadFile(planFile.assets[0].uri, `activities/${Date.now()}_plan.${planFile.assets[0].name.split('.').pop()}`);
+        } catch (error) {
+          console.error('Error uploading plan file:', error);
+          Alert.alert('Lỗi', 'Không thể tải lên file kế hoạch. Vui lòng thử lại.');
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      const startDateTime = new Date(startDate)
+      startDateTime.setHours(startTime.getHours(), startTime.getMinutes())
+
+      const endDateTime = new Date(endDate)
+      endDateTime.setHours(endTime.getHours(), endTime.getMinutes())
+
+      const durationHours = (endDateTime.getTime() - startDateTime.getTime()) / (1000 * 60 * 60)
+
+      const newActivity = {
+        name: activityName,
+        startDate: Timestamp.fromDate(startDateTime),
+        endDate: Timestamp.fromDate(endDateTime),
+        notes,
+        participantLimit: parseInt(participantLimit),
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+        participants: [],
+        status: "pending",
+        location: location,
+        duration: durationHours,
+        coordinates: currentCoordinates,
+        activityType,
+        planFileUrl,
+        bannerImageUrl,
+        points: parseFloat(points),
+      }
+
+      const docRef = await addDoc(collection(db, "activities"), newActivity)
+
+      const activityWithId = {
+        id: docRef.id,
+        ...newActivity,
+        startDate: Timestamp.fromDate(startDateTime),
+        endDate: Timestamp.fromDate(endDateTime),
+        createdAt: Timestamp.now(),
+      }
+      
+      updateActivities([activityWithId])
+
+      const notificationsRef = collection(db, "notifications")
+      await addDoc(notificationsRef, {
+        title: "Hoạt động mới",
+        message: `Hoạt động "${activityName}" vừa được tạo và đang chờ duyệt.`,
+        createdAt: serverTimestamp(),
+        activityId: docRef.id,
+        read: false,
+        type: "new_activity",
+      })
+
+      setIsLoading(false)
+      Alert.alert("Thành công", "Hoạt động đã được tạo và đang chờ duyệt", [
+        { 
+          text: "OK", 
+          onPress: () => {
+            resetForm();
+            router.back();
+          } 
+        },
+      ])
+    } catch (error) {
+      console.error("Error creating activity:", error)
+      setIsLoading(false)
+      Alert.alert("Lỗi", "Không thể tạo hoạt động. Vui lòng thử lại sau.")
+    }
+  }
 
   const getCurrentLocation = async () => {
     try {
@@ -105,108 +339,6 @@ const TaoHD = () => {
     }
   }
 
-  const validateForm = () => {
-    const errors: FormErrors = {}
-
-    if (!activityName.trim()) {
-      errors.activityName = "Vui lòng nhập tên hoạt động"
-    }
-
-    if (!location.trim()) {
-      errors.location = "Vui lòng nhập địa điểm tổ chức"
-    }
-
-    if (!participantLimit.trim()) {
-      errors.participantLimit = "Vui lòng nhập số lượng tuyển"
-    } else if (isNaN(Number(participantLimit)) || parseInt(participantLimit) <= 0) {
-      errors.participantLimit = "Số lượng tuyển phải là số dương"
-    }
-
-    if (startDate > endDate) {
-      errors.date = "Ngày bắt đầu phải trước ngày kết thúc"
-    }
-
-    if (startDate.toDateString() === endDate.toDateString() && startTime.getHours() > endTime.getHours()) {
-      errors.time = "Thời gian bắt đầu phải trước thời gian kết thúc"
-    }
-
-    setFormErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const handleCreateActivity = async () => {
-    if (!validateForm()) {
-      Alert.alert("Lỗi", "Vui lòng kiểm tra lại thông tin hoạt động")
-      return
-    }
-
-    try {
-      setIsLoading(true)
-      const user = auth().currentUser
-      if (!user) {
-        Alert.alert("Lỗi", "Bạn phải đăng nhập để tạo hoạt động")
-        setIsLoading(false)
-        return
-      }
-
-      const startDateTime = new Date(startDate)
-      startDateTime.setHours(startTime.getHours(), startTime.getMinutes())
-
-      const endDateTime = new Date(endDate)
-      endDateTime.setHours(endTime.getHours(), endTime.getMinutes())
-
-      const durationHours = (endDateTime.getTime() - startDateTime.getTime()) / (1000 * 60 * 60)
-
-      const activitiesRef = firestore().collection("activities")
-
-      const newActivity = {
-        name: activityName,
-        startDate: firestore.Timestamp.fromDate(startDateTime),
-        endDate: firestore.Timestamp.fromDate(endDateTime),
-        notes,
-        participantLimit: parseInt(participantLimit),
-        createdBy: user.uid,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        participants: [],
-        status: "pending",
-        location: location,
-        duration: durationHours,
-        coordinates: currentCoordinates,
-      }
-
-      const docRef = await activitiesRef.add(newActivity)
-
-      const activityWithId = {
-        id: docRef.id,
-        ...newActivity,
-        startDate: firestore.Timestamp.fromDate(startDateTime),
-        endDate: firestore.Timestamp.fromDate(endDateTime),
-        createdAt: firestore.Timestamp.now()
-      }
-      
-      updateActivities([activityWithId])
-
-      const notificationsRef = firestore().collection("notifications")
-      await notificationsRef.add({
-        title: "Hoạt động mới",
-        message: `Hoạt động "${activityName}" vừa được tạo và đang chờ duyệt.`,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        activityId: docRef.id,
-        read: false,
-        type: "new_activity",
-      })
-
-      setIsLoading(false)
-      Alert.alert("Thành công", "Hoạt động đã được tạo và đang chờ duyệt", [
-        { text: "OK", onPress: () => router.back() },
-      ])
-    } catch (error) {
-      console.error("Error creating activity:", error)
-      setIsLoading(false)
-      Alert.alert("Lỗi", "Không thể tạo hoạt động. Vui lòng thử lại.")
-    }
-  }
-
   const onChangeDate = (
     event: any,
     selectedDate: Date | undefined,
@@ -214,8 +346,11 @@ const TaoHD = () => {
     type: string
   ) => {
     if (Platform.OS === "android") {
-      setShowStartPicker(false)
-      setShowEndPicker(false)
+      if (type === 'start') {
+        setShowStartPicker(false)
+      } else {
+        setShowEndPicker(false)
+      }
     }
 
     if (selectedDate) {
@@ -230,8 +365,11 @@ const TaoHD = () => {
     type: string
   ) => {
     if (Platform.OS === "android") {
-      setShowStartTimePicker(false)
-      setShowEndTimePicker(false)
+      if (type === 'start') {
+        setShowStartTimePicker(false)
+      } else {
+        setShowEndTimePicker(false)
+      }
     }
 
     if (selectedTime) {
@@ -251,7 +389,6 @@ const TaoHD = () => {
             styles.header,
             {
               opacity: fadeAnim,
-              transform: [{ translateY }],
             },
           ]}
         >
@@ -266,10 +403,31 @@ const TaoHD = () => {
             styles.formContainer,
             {
               opacity: fadeAnim,
-              transform: [{ translateY }],
             },
           ]}
         >
+          <View style={styles.bannerContainer}>
+            {bannerImage ? (
+              <Image source={{ uri: bannerImage }} style={styles.bannerImage} />
+            ) : (
+              <View style={styles.bannerPlaceholder}>
+                <Ionicons name="image-outline" size={48} color="#999" />
+                <Text style={styles.bannerPlaceholderText}>Thêm banner hoạt động</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.bannerButton}
+              onPress={pickBannerImage}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Ionicons name="camera-outline" size={24} color="#FFFFFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+
           <View style={styles.inputContainer}>
             <Text style={styles.label}>
               Tên hoạt động <Text style={styles.required}>*</Text>
@@ -284,6 +442,22 @@ const TaoHD = () => {
               }}
             />
             {formErrors.activityName ? <Text style={styles.errorText}>{formErrors.activityName}</Text> : null}
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>
+              Loại hoạt động <Text style={styles.required}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={[styles.input, styles.pickerInput, formErrors.activityType ? styles.inputError : null]}
+              onPress={() => setShowTypePicker(true)}
+            >
+              <Text style={[styles.pickerText, !activityType && { color: '#999' }]}>
+                {activityType ? activityTypes.find(type => type.id === activityType)?.name : 'Chọn loại hoạt động'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#007AFF" />
+            </TouchableOpacity>
+            {formErrors.activityType ? <Text style={styles.errorText}>{formErrors.activityType}</Text> : null}
           </View>
 
           <View style={styles.rowContainer}>
@@ -366,10 +540,6 @@ const TaoHD = () => {
             </View>
           </View>
 
-          {formErrors.date || formErrors.time ? (
-            <Text style={styles.errorText}>{formErrors.date || formErrors.time}</Text>
-          ) : null}
-
           {showEndPicker && (
             <DateTimePicker
               value={endDate}
@@ -389,6 +559,10 @@ const TaoHD = () => {
               onChange={(event, selectedTime) => onChangeTime(event, selectedTime, setEndTime, "end")}
             />
           )}
+
+          {formErrors.date || formErrors.time ? (
+            <Text style={styles.errorText}>{formErrors.date || formErrors.time}</Text>
+          ) : null}
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>
@@ -425,8 +599,7 @@ const TaoHD = () => {
                 <Ionicons name="locate" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
-            {formErrors.location ?
-            <Text style={styles.errorText}>{formErrors.location}</Text> : null}
+            {formErrors.location ? <Text style={styles.errorText}>{formErrors.location}</Text> : null}
             {locationError ? <Text style={styles.errorText}>{locationError}</Text> : null}
             {currentCoordinates && (
               <View style={styles.coordinatesContainer}>
@@ -439,15 +612,45 @@ const TaoHD = () => {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Ghi chú</Text>
+            <Text style={styles.label}>File kế hoạch tổ chức</Text>
+            <TouchableOpacity
+              style={[styles.input, styles.fileInput]}
+              onPress={pickPlanFile}
+            >
+              <Text style={[styles.fileText, !planFile && { color: '#999' }]}>
+                {planFile?.canceled === false ? planFile.assets[0].name : 'Chọn file kế hoạch (.doc, .pdf)'}
+              </Text>
+              <Ionicons name="document-attach-outline" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Mô tả</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Nhập ghi chú, mô tả chi tiết về hoạt động..."
+              placeholder="Mô tả chi tiết về hoạt động..."
               value={notes}
               onChangeText={setNotes}
               multiline
               textAlignVertical="top"
             />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>
+              Điểm quy đổi <Text style={styles.required}>*</Text>
+            </Text>
+            <TextInput
+              style={[styles.input, formErrors.points ? styles.inputError : null]}
+              placeholder="Nhập điểm quy đổi"
+              value={points}
+              onChangeText={(text) => {
+                setPoints(text)
+                setFormErrors({ ...formErrors, points: "" })
+              }}
+              keyboardType="numeric"
+            />
+            {formErrors.points ? <Text style={styles.errorText}>{formErrors.points}</Text> : null}
           </View>
 
           <TouchableOpacity
@@ -467,6 +670,47 @@ const TaoHD = () => {
           </TouchableOpacity>
         </Animated.View>
       </ScrollView>
+
+      <Modal
+        visible={showTypePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTypePicker(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Chọn loại hoạt động</Text>
+              <TouchableOpacity onPress={() => setShowTypePicker(false)}>
+                <Ionicons name="close" size={24} color="#007AFF" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {activityTypes.map((type) => (
+                <TouchableOpacity
+                  key={type.id}
+                  style={[
+                    styles.typeOption,
+                    activityType === type.id && styles.selectedTypeOption,
+                  ]}
+                  onPress={() => {
+                    setActivityType(type.id);
+                    setFormErrors({ ...formErrors, activityType: "" });
+                    setShowTypePicker(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.typeOptionText,
+                    activityType === type.id && styles.selectedTypeOptionText,
+                  ]}>
+                    {type.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {isLoading && (
         <View style={styles.loadingOverlay}>
@@ -563,19 +807,25 @@ const styles = StyleSheet.create({
     height: 120,
     textAlignVertical: "top",
   },
-  dateButton: {
+  pickerInput: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F5F7FA",
-    borderRadius: 12,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: "#E5E9F0",
   },
-  dateButtonText: {
+  pickerText: {
     fontSize: 16,
     color: "#1A2138",
+  },
+  fileInput: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  fileText: {
+    fontSize: 16,
+    color: "#1A2138",
+    flex: 1,
+    marginRight: 8,
   },
   locationInputContainer: {
     flexDirection: "row",
@@ -621,6 +871,105 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 1000,
   },
+  bannerContainer: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 20,
+    backgroundColor: '#F5F7FA',
+    position: 'relative',
+  },
+  bannerImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  bannerPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5F7FA',
+  },
+  bannerPlaceholderText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 8,
+  },
+  bannerButton: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    width: '80%',
+    maxHeight: '80%',
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1A2138',
+  },
+  typeOption: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E9F0',
+  },
+  selectedTypeOption: {
+    backgroundColor: '#F0F4F8',
+  },
+  typeOptionText: {
+    fontSize: 16,
+    color: '#1A2138',
+  },
+  selectedTypeOptionText: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  dateButton: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F5F7FA",
+    borderRadius: 12,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#E5E9F0",
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: "#1A2138",
+  },
 })
 
-export default TaoHD
+export default AdminTaoHoatDong;

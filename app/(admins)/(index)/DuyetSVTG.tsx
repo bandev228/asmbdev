@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, Dimensions } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, Dimensions, Alert } from 'react-native';
+import { getFirestore, collection, query, where, getDocs, Timestamp } from '@react-native-firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../../context/ThemeContext';
 
 interface Activity {
   id: string;
@@ -17,7 +18,9 @@ const screenHeight = Dimensions.get('window').height;
 const DuyetSVTGHD = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { theme } = useTheme();
 
   useEffect(() => {
     fetchActivities();
@@ -25,25 +28,34 @@ const DuyetSVTGHD = () => {
 
   const fetchActivities = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const activitiesSnapshot = await firestore().collection('activities').get();
-      const activitiesList = await Promise.all(activitiesSnapshot.docs.map(async doc => {
-        const data = doc.data();
-        const pendingParticipants = data.pendingParticipants || [];
-        const pendingCount = pendingParticipants.length;
+      const db = getFirestore();
+      const activitiesQuery = query(
+        collection(db, 'activities'),
+        where('pendingParticipants', '!=', [])
+      );
 
-        return {
-          id: doc.id,
-          name: data.name,
-          pendingCount: pendingCount,
-          pendingParticipants
-        };
-      }));
+      const snapshot = await getDocs(activitiesQuery);
+      const activitiesList = await Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const data = doc.data();
+          const pendingParticipants = data.pendingParticipants || [];
+          const pendingCount = pendingParticipants.length;
+
+          return {
+            id: doc.id,
+            name: data.name,
+            pendingCount,
+            pendingParticipants
+          } as Activity;
+        })
+      );
 
       setActivities(activitiesList.filter(activity => activity.pendingCount > 0));
     } catch (error) {
       console.error('Error fetching activities:', error);
-      alert('Không thể lấy danh sách hoạt động. Vui lòng thử lại.');
+      setError('Không thể lấy danh sách hoạt động. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -51,30 +63,42 @@ const DuyetSVTGHD = () => {
 
   const renderActivityItem = ({ item }: { item: Activity }) => (
     <TouchableOpacity
-      style={styles.activityItem}
+      style={[styles.activityItem, { backgroundColor: theme.colors.card }]}
       onPress={() => router.push({
         pathname: './DuyetSV',
         params: { activityId: item.id, activityName: item.name }
       })}
     >
-      <Text style={styles.activityName}>{item.name}</Text>
-      <Text style={styles.pendingCount}>Sinh viên chờ duyệt: {item.pendingCount}</Text>
+      <Text style={[styles.activityName, { color: theme.colors.text }]}>{item.name}</Text>
+      <Text style={[styles.pendingCount, { color: theme.colors.secondary }]}>
+        Sinh viên chờ duyệt: {item.pendingCount}
+      </Text>
     </TouchableOpacity>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.colors.card }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Danh sách sinh viên chờ duyệt</Text>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Danh sách sinh viên chờ duyệt</Text>
         <TouchableOpacity onPress={fetchActivities} style={styles.refreshButton}>
-          <Ionicons name="refresh-outline" size={24} color="#007AFF" />
+          <Ionicons name="refresh-outline" size={24} color={theme.colors.primary} />
         </TouchableOpacity>
       </View>
       {loading ? (
-        <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
+        <ActivityIndicator size="large" color={theme.colors.primary} style={styles.loader} />
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Text style={[styles.errorText, { color: theme.colors.error }]}>{error}</Text>
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: theme.colors.primary }]}
+            onPress={fetchActivities}
+          >
+            <Text style={styles.retryButtonText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
       ) : activities.length > 0 ? (
         <FlatList
           data={activities}
@@ -83,7 +107,9 @@ const DuyetSVTGHD = () => {
           contentContainerStyle={styles.listContent}
         />
       ) : (
-        <Text style={styles.noActivitiesText}>Không có hoạt động nào có sinh viên chờ duyệt.</Text>
+        <Text style={[styles.noActivitiesText, { color: theme.colors.secondary }]}>
+          Không có hoạt động nào có sinh viên chờ duyệt.
+        </Text>
       )}
     </SafeAreaView>
   );
@@ -92,14 +118,12 @@ const DuyetSVTGHD = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F5',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: screenWidth * 0.04,
-    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
   },
@@ -112,7 +136,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: screenWidth * 0.05,
     fontWeight: 'bold',
-    color: '#333333',
     flex: 1,
     textAlign: 'center',
   },
@@ -125,7 +148,6 @@ const styles = StyleSheet.create({
     padding: screenWidth * 0.04,
   },
   activityItem: {
-    backgroundColor: '#FFFFFF',
     padding: screenWidth * 0.04,
     marginBottom: screenHeight * 0.02,
     borderRadius: 8,
@@ -139,17 +161,35 @@ const styles = StyleSheet.create({
     fontSize: screenWidth * 0.045,
     fontWeight: 'bold',
     marginBottom: screenHeight * 0.01,
-    color: '#333333',
   },
   pendingCount: {
     fontSize: screenWidth * 0.035,
-    color: '#666666',
   },
   noActivitiesText: {
     fontSize: screenWidth * 0.04,
     textAlign: 'center',
     padding: screenWidth * 0.04,
-    color: '#666666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

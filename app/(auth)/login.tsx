@@ -158,6 +158,16 @@ export default function Login() {
       // Check if user document already exists
       const userDoc = await getDoc(userRef)
 
+      // Determine role based on email
+      let role = "user"
+      if (user.email === "admin@gmail.com") {
+        role = "admin"
+      } else if (user.email?.endsWith("@student.tdmu.edu.vn")) {
+        role = "student"
+      } else if (user.email?.endsWith("@tdmu.edu.vn")) {
+        role = "staff"
+      }
+
       if (!userDoc.exists) {
         // Nếu user chưa tồn tại, tạo document mới
         await setDoc(userRef, {
@@ -166,14 +176,16 @@ export default function Login() {
           photoURL: user.photoURL || null,
           createdAt: serverTimestamp(),
           lastLoginAt: serverTimestamp(),
+          role: role, // Add role field
         })
-        console.log("New user added to Firestore")
+        console.log("New user added to Firestore with role:", role)
       } else {
-        // Nếu user đã tồn tại, chỉ cập nhật lastLoginAt
+        // Nếu user đã tồn tại, cập nhật lastLoginAt và role
         await updateDoc(userRef, {
           lastLoginAt: serverTimestamp(),
+          role: role, // Update role field
         })
-        console.log("Existing user updated in Firestore")
+        console.log("Existing user updated in Firestore with role:", role)
       }
 
       // Luôn thêm mục nhập lịch sử đăng nhập mới

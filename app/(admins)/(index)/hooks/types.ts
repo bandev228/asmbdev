@@ -4,11 +4,12 @@ export interface ActivityData {
   id: string;
   name: string;
   participants: string[];
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'completed';
   date: Date;
   location: string;
   createdAt: Date;
   description: string;
+  bannerImageUrl?: string;
 }
 
 export interface ChartDataItem {

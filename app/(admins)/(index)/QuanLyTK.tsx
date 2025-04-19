@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, SafeAreaView, TextInput, Modal, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import firestore from '@react-native-firebase/firestore';
+import { getFirestore, collection, getDocs, doc, deleteDoc, updateDoc, query, where } from '@react-native-firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import type { Route } from 'expo-router';
 
@@ -22,6 +22,7 @@ const QuanLyTK = () => {
   const [loading, setLoading] = useState(true);
   const [selectedRole, setSelectedRole] = useState<'all' | 'admin' | 'manager' | 'student'>('all');
   const router = useRouter();
+  const db = getFirestore();
 
   useEffect(() => {
     fetchAccounts();
@@ -34,7 +35,8 @@ const QuanLyTK = () => {
   const fetchAccounts = async () => {
     setLoading(true);
     try {
-      const snapshot = await firestore().collection('users').get();
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
       const accountList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -74,7 +76,8 @@ const QuanLyTK = () => {
           text: "Xóa", 
           onPress: async () => {
             try {
-              await firestore().collection('users').doc(accountId).delete();
+              const userRef = doc(db, 'users', accountId);
+              await deleteDoc(userRef);
               Alert.alert('Thành công', 'Tài khoản đã được xóa');
               fetchAccounts();
             } catch (error) {
@@ -90,7 +93,8 @@ const QuanLyTK = () => {
 
   const updateRole = async (accountId: string, newRole: 'admin' | 'manager' | 'student') => {
     try {
-      await firestore().collection('users').doc(accountId).update({ role: newRole });
+      const userRef = doc(db, 'users', accountId);
+      await updateDoc(userRef, { role: newRole });
       Alert.alert('Thành công', 'Vai trò tài khoản đã được cập nhật');
       fetchAccounts();
       setModalVisible(false);
@@ -126,7 +130,7 @@ const QuanLyTK = () => {
   );
 
   const handleModalActions = () => {
-    if (!selectedAccount) return;
+    if (!selectedAccount) return null;
 
     return (
       <View style={styles.modalButtons}>
