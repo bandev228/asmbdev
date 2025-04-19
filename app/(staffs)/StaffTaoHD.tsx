@@ -49,11 +49,12 @@ interface Activity {
 }
 
 const activityTypes = [
-  { id: 'volunteer', name: 'Tình nguyện' },
-  { id: 'union', name: 'Đoàn Hội' },
-  { id: 'club', name: 'CLB' },
-  { id: 'academic', name: 'Học thuật' },
-  { id: 'softskill', name: 'Kỹ năng mềm' },
+  { id: 'hocthuat', name: 'Học thuật' },
+  { id: 'tinhnguyen', name: 'Tình nguyện' },
+  { id: 'thidau', name: 'Thi đấu' },
+  { id: 'vannghe', name: 'Văn nghệ' },
+  { id: 'thethao', name: 'Thể thao' },
+  { id: 'hoinhap', name: 'Hội nhập' },
   { id: 'other', name: 'Khác' },
 ];
 

@@ -185,7 +185,7 @@ export default function Login() {
           lastLoginAt: serverTimestamp(),
           role: role, // Update role field
         })
-        console.log("Existing user updated in Firestore with role:", role)
+        // console.log("Existing user updated in Firestore with role:", role)
       }
 
       // Luôn thêm mục nhập lịch sử đăng nhập mới
@@ -199,7 +199,7 @@ export default function Login() {
         loginMethod: user._authCredential ? "google" : "email", // Thêm thông tin phương thức đăng nhập
       })
 
-      console.log("Login history recorded")
+      // console.log("Login history recorded")
     } catch (error) {
       console.error("Error saving user data to Firestore:", error)
     }
@@ -407,7 +407,7 @@ export default function Login() {
       const savedEmail = await AsyncStorage.getItem('userEmail')
       const savedPassword = await AsyncStorage.getItem('userPassword')
       
-      console.log('Has saved credentials:', !!savedEmail && !!savedPassword)
+      // console.log('Has saved credentials:', !!savedEmail && !!savedPassword)
       
       if (savedEmail && savedPassword) {
         setShowBiometric(true)
@@ -434,7 +434,7 @@ export default function Login() {
           ]}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>ASM TDMU APP</Text>
+            <Text style={styles.title}>SAM TDMU APP</Text>
             <Text style={styles.subtitle}>Đăng nhập để trải nghiệm !</Text>
           </View>
 
