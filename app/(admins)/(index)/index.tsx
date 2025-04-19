@@ -641,26 +641,26 @@ export default function AdminDashboard() {
               <Text style={styles.actionButtonText}>Thông báo</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => router.push("./GuiTaiLieu")}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => router.push("./GuiTL")}>
               <LinearGradient colors={["#14b8a6", "#0d9488"]} style={styles.actionButtonGradient}>
                 <Ionicons name="document-text" size={24} color="#fff" />
               </LinearGradient>
               <Text style={styles.actionButtonText}>Tài liệu</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => router.push("./BaoCao")}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => Alert.alert("Thông báo", "Tính năng này sẽ sớm được cập nhật")}>
               <LinearGradient colors={["#f97316", "#ea580c"]} style={styles.actionButtonGradient}>
                 <Ionicons name="analytics" size={24} color="#fff" />
               </LinearGradient>
               <Text style={styles.actionButtonText}>Báo cáo</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => router.push("./CaiDat")}>
+            {/* <TouchableOpacity style={styles.actionButton} onPress={() => router.push("./CaiDat")}>
               <LinearGradient colors={["#64748b", "#475569"]} style={styles.actionButtonGradient}>
                 <Ionicons name="settings" size={24} color="#fff" />
               </LinearGradient>
               <Text style={styles.actionButtonText}>Cài đặt</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </Animated.View>
         

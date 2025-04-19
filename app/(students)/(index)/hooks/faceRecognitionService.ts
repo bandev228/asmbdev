@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import * as FaceDetector from 'expo-face-detector';
 import storage from '@react-native-firebase/storage';
-import auth from '@react-native-firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
 import * as ImageManipulator from 'expo-image-manipulator';
 import firestore from '@react-native-firebase/firestore';
 import { Platform } from 'react-native';
@@ -96,7 +96,8 @@ const preprocessImage = async (imageUri: string): Promise<string> => {
  * Tải ảnh đại diện của người dùng với caching
  */
 export const downloadUserAvatar = async (): Promise<string> => {
-  const user = auth().currentUser;
+  const auth = getAuth()
+  const user = auth.currentUser;
   if (!user) throw new Error('Người dùng chưa đăng nhập');
   
   // Check cache first
@@ -415,4 +416,3 @@ export const compareImagesDirect = async (image1Uri: string, image2Uri: string):
 }
 
 export default verifyFaceMatch;
-

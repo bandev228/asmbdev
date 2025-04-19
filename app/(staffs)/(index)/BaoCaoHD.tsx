@@ -24,6 +24,9 @@ interface Activity {
   attendanceTime?: {
     [key: string]: Timestamp;
   };
+  pendingParticipants?: string[];
+  activityType?: string;
+  points?: number;
 }
 
 interface User {
@@ -104,23 +107,69 @@ const BaoCaoHoatDong = () => {
   const exportToExcel = async () => {
     try {
       // Chuẩn bị dữ liệu cho file Excel
-      const data = activities.map(activity => ({
-        'Tên hoạt động': activity.name,
-        'Ngày tạo': activity.createdAt.toDate().toLocaleDateString(),
-        'Trạng thái': activity.status,
-        'Số người tham gia': activity.participants?.length || 0,
-        'Địa điểm': activity.location || 'Chưa cập nhật',
-        'Thời gian bắt đầu': activity.startDate?.toDate().toLocaleDateString() || 'Chưa cập nhật',
-        'Thời gian kết thúc': activity.endDate?.toDate().toLocaleDateString() || 'Chưa cập nhật',
-      }));
+      const data = activities.map(activity => {
+        const startDate = activity.startDate?.toDate();
+        const endDate = activity.endDate?.toDate();
+        const createdAt = activity.createdAt.toDate();
 
+        const getStatusText = (status: string) => {
+          switch (status) {
+            case 'completed':
+              return 'Hoàn thành';
+            case 'pending':
+              return 'Đang chờ';
+            case 'cancelled':
+              return 'Đã hủy';
+            default:
+              return 'Không xác định';
+          }
+        };
+
+        return {
+          'Tên hoạt động': activity.name,
+          'Trạng thái': getStatusText(activity.status),
+          'Ngày tạo': createdAt.toLocaleDateString('vi-VN'),
+          'Thời gian tạo': createdAt.toLocaleTimeString('vi-VN'),
+          'Thời gian bắt đầu': startDate ? startDate.toLocaleString('vi-VN') : 'Chưa cập nhật',
+          'Thời gian kết thúc': endDate ? endDate.toLocaleString('vi-VN') : 'Chưa cập nhật',
+          'Địa điểm': activity.location || 'Chưa cập nhật',
+          'Số người tham gia': activity.participants?.length || 0,
+          'Số người chờ duyệt': activity.pendingParticipants?.length || 0,
+          'Loại hoạt động': activity.activityType || 'Chưa phân loại',
+          'Điểm rèn luyện': activity.points || 0,
+        };
+      });
+
+      // Tạo workbook và worksheet
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Activities');
 
-      const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const fileName = `activities_report_${selectedDate.toISOString().split('T')[0]}.xlsx`;
+      // Điều chỉnh độ rộng cột
+      const columnWidths = [
+        { wch: 40 }, // Tên hoạt động
+        { wch: 15 }, // Trạng thái
+        { wch: 15 }, // Ngày tạo
+        { wch: 15 }, // Thời gian tạo
+        { wch: 20 }, // Thời gian bắt đầu
+        { wch: 20 }, // Thời gian kết thúc
+        { wch: 30 }, // Địa điểm
+        { wch: 15 }, // Số người tham gia
+        { wch: 15 }, // Số người chờ duyệt
+        { wch: 20 }, // Loại hoạt động
+        { wch: 15 }, // Điểm rèn luyện
+      ];
+      ws['!cols'] = columnWidths;
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Báo cáo hoạt động');
+
+      const fileName = `bao_cao_hoat_dong_${selectedDate.toISOString().split('T')[0]}.xlsx`;
       const filePath = `${FileSystem.documentDirectory}${fileName}`;
+
+      const wbout = XLSX.write(wb, { 
+        type: 'base64', 
+        bookType: 'xlsx',
+        bookSST: false,
+      });
 
       await FileSystem.writeAsStringAsync(filePath, wbout, {
         encoding: FileSystem.EncodingType.Base64
@@ -130,8 +179,17 @@ const BaoCaoHoatDong = () => {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         dialogTitle: 'Xuất báo cáo hoạt động',
       });
+
+      Alert.alert(
+        'Thành công',
+        'Đã xuất báo cáo hoạt động thành công!'
+      );
     } catch (error) {
       console.error('Error exporting to Excel:', error);
+      Alert.alert(
+        'Lỗi',
+        'Không thể xuất báo cáo. Vui lòng thử lại sau.'
+      );
     }
   };
 
@@ -143,30 +201,60 @@ const BaoCaoHoatDong = () => {
       // Fetch thông tin chi tiết của từng sinh viên
       const participantsData = await Promise.all(
         participantIds.map(async (userId) => {
-          const userDoc = await getDocs(
-            query(collection(db, 'users'), where('uid', '==', userId))
-          );
-          
-          const userData = userDoc.docs[0]?.data() as User;
-          return {
-            'MSSV': userData?.studentId || 'N/A',
-            'Họ và tên': userData?.fullname || 'N/A',
-            'Email': userData?.email || 'N/A',
-            'Lớp': userData?.className || 'N/A',
-            'Số điện thoại': userData?.phoneNumber || 'N/A',
-            'Thời gian điểm danh': activity.attendanceTime?.[userId]?.toDate().toLocaleString() || 'Chưa điểm danh'
-          };
+          try {
+            const userDoc = await getDocs(
+              query(collection(db, 'users'), where('uid', '==', userId))
+            );
+            
+            const userData = userDoc.docs[0]?.data() as User;
+            const attendanceTime = activity.attendanceTime?.[userId]?.toDate();
+
+            return {
+              'MSSV': userData?.studentId || 'N/A',
+              'Họ và tên': userData?.fullname || 'N/A',
+              'Email': userData?.email || 'N/A',
+              'Lớp': userData?.className || 'N/A',
+              'Số điện thoại': userData?.phoneNumber || 'N/A',
+              'Thời gian điểm danh': attendanceTime ? 
+                attendanceTime.toLocaleString('vi-VN') : 'Chưa điểm danh',
+              'Trạng thái': 'Đã tham gia'
+            };
+          } catch (error) {
+            console.error('Error fetching user data:', error);
+            return null;
+          }
         })
       );
 
-      // Tạo và xuất file Excel
-      const ws = XLSX.utils.json_to_sheet(participantsData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Participants');
+      // Lọc bỏ các giá trị null và undefined
+      const validParticipantsData = participantsData.filter(data => data !== null);
 
-      const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const fileName = `participants_${activity.name}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      // Tạo và xuất file Excel
+      const ws = XLSX.utils.json_to_sheet(validParticipantsData);
+      const wb = XLSX.utils.book_new();
+
+      // Điều chỉnh độ rộng cột
+      const columnWidths = [
+        { wch: 15 }, // MSSV
+        { wch: 30 }, // Họ và tên
+        { wch: 35 }, // Email
+        { wch: 15 }, // Lớp
+        { wch: 15 }, // Số điện thoại
+        { wch: 20 }, // Thời gian điểm danh
+        { wch: 15 }, // Trạng thái
+      ];
+      ws['!cols'] = columnWidths;
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Danh sách sinh viên');
+
+      const fileName = `danh_sach_sinh_vien_${activity.name}_${new Date().toISOString().split('T')[0]}.xlsx`;
       const filePath = `${FileSystem.documentDirectory}${fileName}`;
+
+      const wbout = XLSX.write(wb, { 
+        type: 'base64', 
+        bookType: 'xlsx',
+        bookSST: false,
+      });
 
       await FileSystem.writeAsStringAsync(filePath, wbout, {
         encoding: FileSystem.EncodingType.Base64
@@ -176,9 +264,17 @@ const BaoCaoHoatDong = () => {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         dialogTitle: `Danh sách sinh viên - ${activity.name}`,
       });
+
+      Alert.alert(
+        'Thành công',
+        'Đã xuất danh sách sinh viên thành công!'
+      );
     } catch (error) {
       console.error('Error exporting participants list:', error);
-      Alert.alert('Lỗi', 'Không thể xuất danh sách sinh viên. Vui lòng thử lại sau.');
+      Alert.alert(
+        'Lỗi',
+        'Không thể xuất danh sách sinh viên. Vui lòng thử lại sau.'
+      );
     }
   };
 

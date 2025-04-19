@@ -400,7 +400,7 @@ const StudentDashboard = () => {
         {/* Main Navigation Section */}
         <View style={styles.navigationSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Truy cập</Text>
+            <Text style={styles.sectionTitle}>Tính năng</Text>
             <View style={styles.sectionDivider} />
           </View>
           <View style={styles.buttonContainer}>

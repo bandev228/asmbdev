@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Dimensions, Image } from 'react-native';
-import { getFirestore, collection, query, where, getDocs, doc, updateDoc, arrayRemove, increment } from '@react-native-firebase/firestore';
+import { getFirestore, collection, query, where, getDocs, doc, updateDoc, arrayRemove, increment, Timestamp } from '@react-native-firebase/firestore';
 import { getAuth } from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -20,6 +20,7 @@ interface Activity {
   imageUrl?: string;
   category?: string;
   organizer?: string;
+  hasAttended?: boolean;
 }
 
 const screenWidth = Dimensions.get('window').width;
@@ -32,6 +33,23 @@ const HoatDongThamGia = () => {
   const router = useRouter();
   const auth = getAuth();
   const db = getFirestore();
+
+  const checkAttendanceStatus = async (activityId: string, userId: string): Promise<boolean> => {
+    try {
+      const attendanceQuery = query(
+        collection(db, 'attendance'),
+        where('activityId', '==', activityId),
+        where('userId', '==', userId),
+        where('status', '==', 'verified')
+      );
+      
+      const querySnapshot = await getDocs(attendanceQuery);
+      return !querySnapshot.empty;
+    } catch (error) {
+      console.error('Error checking attendance status:', error);
+      return false;
+    }
+  };
 
   useEffect(() => {
     fetchActivities();
@@ -51,16 +69,18 @@ const HoatDongThamGia = () => {
       );
 
       const snapshot = await getDocs(activitiesQuery);
-      const activitiesData = snapshot.docs.map(doc => {
+      const activitiesData = await Promise.all(snapshot.docs.map(async doc => {
         const data = doc.data();
+        const hasAttended = await checkAttendanceStatus(doc.id, userId);
         return {
           id: doc.id,
           ...data,
           startDate: data.startDate?.toDate(),
           endDate: data.endDate?.toDate(),
-          participants: Array.isArray(data.participants) ? data.participants.length : 0
+          participants: Array.isArray(data.participants) ? data.participants.length : 0,
+          hasAttended
         }
-      }) as Activity[];
+      })) as Activity[];
 
       setActivities(activitiesData);
       setLoading(false);
@@ -142,10 +162,10 @@ const HoatDongThamGia = () => {
         <View style={styles.activityFooter}>
           <View style={[
             styles.statusBadge,
-            { backgroundColor: item.status === 'approved' ? '#4CAF50' : '#FFC107' }
+            { backgroundColor: item.hasAttended ? '#4CAF50' : '#FFC107' }
           ]}>
             <Text style={styles.statusText}>
-              {item.status === 'approved' ? 'Đã phê duyệt' : 'Đang chờ'}
+              {item.hasAttended ? 'Đã điểm danh' : 'Chưa điểm danh'}
             </Text>
           </View>
           <TouchableOpacity

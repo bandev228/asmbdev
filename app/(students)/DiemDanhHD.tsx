@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, SafeAreaView, ActivityIndicator, Modal, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { getFirestore, collection, query, where, getDocs, addDoc, serverTimestamp } from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import { verifyFaceMatch, compareImagesDirect, downloadUserAvatar } from './(index)/hooks/faceRecognitionService';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -42,6 +42,7 @@ const DiemDanhSinhVien = () => {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 3;
+  const auth = getAuth()
 
   // Tải ảnh đại diện khi component mount
   useEffect(() => {
@@ -143,7 +144,7 @@ const DiemDanhSinhVien = () => {
     setUploading(true);
     setUploadProgress(0);
 
-    const user = auth().currentUser;
+    const user = auth.currentUser;
     if (!user) {
       Alert.alert('Thông báo', 'Vui lòng đăng nhập để điểm danh');
       setUploading(false);

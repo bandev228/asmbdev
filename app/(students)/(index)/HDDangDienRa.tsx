@@ -7,6 +7,13 @@ import { getFirestore, collection, query, where, getDocs, doc, updateDoc, arrayU
 import { useAuth } from '@/app/_layout';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { useIsFocused } from '@react-navigation/native';
+
+interface AttendanceRouteParams {
+  activityId: string;
+  activityName: string;
+  onAttendanceComplete: () => Promise<void>;
+}
 
 interface Activity {
   id: string;
@@ -27,6 +34,24 @@ interface Activity {
   status?: string;
   organizer?: string;
   requirements?: string;
+  attendanceStatus?: {
+    [userId: string]: {
+      status: 'attended' | 'not_attended';
+      timestamp: Timestamp;
+    }
+  };
+  hasAttended: boolean;
+}
+
+interface AttendanceRecord {
+  activityId: string;
+  userId: string;
+  status: 'verified' | 'pending' | 'failed';
+  timestamp: Timestamp;
+  imageData: string;
+  verificationMethod: string;
+  verificationScore: number;
+  verifiedByAI: boolean;
 }
 
 const formatParticipantCount = (participants: string[] = [], maxParticipants?: number) => {
@@ -50,6 +75,13 @@ const HDDangDienRa = () => {
   const [registering, setRegistering] = useState<string | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const isFocused = useIsFocused();
+
+  useEffect(() => {
+    if (isFocused && !initializing && user) {
+      fetchActivities();
+    }
+  }, [isFocused, user, initializing]);
 
   useEffect(() => {
     if (initializing) {
@@ -154,7 +186,27 @@ const HDDangDienRa = () => {
     return null;
   };
 
-  const handleAttendance = (activity: Activity) => {
+  const checkAttendanceStatus = async (activityId: string): Promise<boolean> => {
+    if (!user) return false;
+    
+    try {
+      const db = getFirestore();
+      const attendanceQuery = query(
+        collection(db, 'attendance'),
+        where('activityId', '==', activityId),
+        where('userId', '==', user.uid),
+        where('status', '==', 'verified')
+      );
+      
+      const querySnapshot = await getDocs(attendanceQuery);
+      return !querySnapshot.empty;
+    } catch (error) {
+      console.error('Error checking attendance status:', error);
+      return false;
+    }
+  };
+
+  const handleAttendance = async (activity: Activity) => {
     if (!user) {
       Alert.alert("Thông báo", "Vui lòng đăng nhập để điểm danh");
       return;
@@ -168,34 +220,95 @@ const HDDangDienRa = () => {
       return;
     }
 
+    // Check if already attended
+    const hasAttended = await checkAttendanceStatus(activity.id);
+    if (hasAttended) {
+      Alert.alert("Thông báo", "Bạn đã điểm danh hoạt động này rồi");
+      return;
+    }
+
+    // Navigate to attendance screen
     router.push({
       pathname: "/DiemDanhHD",
-      params: { 
+      params: {
         activityId: activity.id,
         activityName: activity.name
       }
     });
   };
 
+  // Update useEffect to check attendance status and filter ongoing activities
+  useEffect(() => {
+    const updateAttendanceStatus = async () => {
+      if (!user || !isFocused) return;
+
+      try {
+        const db = getFirestore();
+        const now = Timestamp.now();
+        
+        // Query for ongoing activities
+        const activitiesQuery = query(
+          collection(db, 'activities'),
+          where('startDate', '<=', now),
+          where('endDate', '>=', now)
+        );
+        const activitiesSnapshot = await getDocs(activitiesQuery);
+
+        // Get attendance records
+        const attendanceQuery = query(
+          collection(db, 'attendance'),
+          where('userId', '==', user.uid),
+          where('status', '==', 'verified')
+        );
+        const attendanceSnapshot = await getDocs(attendanceQuery);
+        
+        const attendedActivityIds = new Set(
+          attendanceSnapshot.docs.map(doc => doc.data().activityId)
+        );
+
+        const updatedActivities = activitiesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          hasAttended: attendedActivityIds.has(doc.id)
+        })) as Activity[];
+
+        setActivities(updatedActivities);
+      } catch (error) {
+        console.error('Error updating attendance status:', error);
+      }
+    };
+
+    updateAttendanceStatus();
+  }, [isFocused, user]);
+
   const renderRegistrationButton = (activity: Activity | null) => {
-    if (!activity) return null;
+    if (!activity || !user) return null;
     
     const status = getRegistrationStatus(activity);
     
     if (status === 'approved') {
+      const hasAttended = activity.hasAttended;
+      
       return (
         <View style={styles.buttonContainer}>
           <View style={[styles.statusBadge, styles.approvedBadge]}>
             <Ionicons name="checkmark-circle" size={16} color="#fff" />
             <Text style={styles.statusText}>Đã được duyệt</Text>
           </View>
-          <TouchableOpacity
-            style={styles.attendanceButton}
-            onPress={() => handleAttendance(activity)}
-          >
-            <Ionicons name="qr-code" size={20} color="#fff" />
-            <Text style={styles.attendanceButtonText}>Điểm danh</Text>
-          </TouchableOpacity>
+          {hasAttended ? (
+            <View style={[styles.attendanceButton, { backgroundColor: '#34C759' }]}>
+              <Ionicons name="checkmark-circle" size={20} color="#fff" />
+              <Text style={styles.attendanceButtonText}>Đã điểm danh</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.attendanceButton}
+              onPress={() => handleAttendance(activity)}
+            >
+              <Ionicons name="qr-code" size={20} color="#fff" />
+              <Text style={styles.attendanceButtonText}>Điểm danh</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }

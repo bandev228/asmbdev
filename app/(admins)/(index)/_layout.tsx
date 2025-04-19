@@ -92,6 +92,13 @@ export default function IndexLayout() {
           presentation: "card",
         }}
       />
+      <Stack.Screen
+        name="GuiTL"
+        options={{
+          headerShown: false,
+          presentation: "card",
+        }}
+      />
       {/* <Stack.Screen
         name="AdminTaoHD"
         options={{

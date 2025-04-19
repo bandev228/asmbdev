@@ -234,13 +234,13 @@ const ManagerScreen = () => {
           </View>
           <View style={styles.quickActionButtons}>
             <NavigationButton
-              title="Tạo hoạt động mới" 
+              title="Duyệt sinh viên" 
               icon="add-circle-outline" 
-              onPress={() => router.push("./StaffTaoHD")}
+              onPress={() => router.push("./DuyetSV")}
               color="#3949AB"
               containerStyle={styles.quickActionButton}
               delay={100}
-              route="./StaffTaoHD"
+              route="./DuyetSV"
             />
             <NavigationButton
               title="Duyệt hoạt động" 
@@ -395,14 +395,14 @@ const ManagerScreen = () => {
               delay={400}
               route="./TiepNhanPH"
             />
-            <NavigationButton
+            {/* <NavigationButton
               title="Cài đặt" 
               icon="settings-outline" 
               onPress={() => router.push("./CaiDat")}
               color="#546E7A"
               delay={450}
               route="./CaiDat"
-            />
+            /> */}
           </View>
         </View>
         

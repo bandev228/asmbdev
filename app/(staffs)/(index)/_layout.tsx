@@ -58,13 +58,6 @@ export default function IndexLayout() {
       }}
       />
       <Stack.Screen
-      name="CaiDat"
-      options={{
-        headerShown: false,
-        presentation: "card",
-      }}
-      />
-      <Stack.Screen
       name="QuanLyTB"
       options={{
         headerShown: false,
