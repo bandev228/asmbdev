@@ -434,7 +434,7 @@ export default function Login() {
           ]}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>SAM TDMU APP</Text>
+            <Text style={styles.title}>SAM APP TDMU</Text>
             <Text style={styles.subtitle}>Đăng nhập để trải nghiệm !</Text>
           </View>
 

@@ -410,9 +410,9 @@ const StudentTaiKhoan = () => {
           ) : (
             <Text style={styles.userName}>{user?.displayName}</Text>
           )}
-          <Text style={styles.userEmail}>{user?.email}</Text>
+          {/* <Text style={styles.userEmail}>{user?.email}</Text> */}
 
-          <View style={styles.statsContainer}>
+          {/* <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{user?.eventsJoined || 0}</Text>
               <Text style={styles.statLabel}>Sự kiện đã tham gia</Text>
@@ -422,7 +422,7 @@ const StudentTaiKhoan = () => {
               <Text style={styles.statValue}>{user?.points || 0}</Text>
               <Text style={styles.statLabel}>Điểm tích lũy</Text>
             </View>
-          </View>
+          </View> */}
 
           <View style={styles.infoSection}>
             <View style={styles.infoItem}>
@@ -439,7 +439,7 @@ const StudentTaiKhoan = () => {
               )}
             </View>
 
-            <View style={styles.infoItem}>
+            {/* <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Khoa/Ngành</Text>
               {editMode ? (
                 <TextInput
@@ -451,7 +451,7 @@ const StudentTaiKhoan = () => {
               ) : (
                 <Text style={styles.infoValue}>{user?.department || "Chưa cập nhật"}</Text>
               )}
-            </View>
+            </View> */}
           </View>
 
           {editMode && (
@@ -500,11 +500,11 @@ const StudentTaiKhoan = () => {
               )
             }}
           >
-            <View style={styles.settingContent}>
+            {/* <View style={styles.settingContent}>
               <Ionicons name="key-outline" size={24} color="#007AFF" />
               <Text style={styles.settingText}>Đổi mật khẩu</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
+            </View> */}
+            {/* <Ionicons name="chevron-forward" size={24} color="#C7C7CC" /> */}
           </TouchableOpacity>
 
           {biometricAvailable && (
@@ -522,7 +522,7 @@ const StudentTaiKhoan = () => {
             </View>
           )}
 
-          <View style={styles.settingItem}>
+          {/* <View style={styles.settingItem}>
             <View style={styles.settingContent}>
               <Ionicons name="logo-google" size={24} color="#007AFF" />
               <Text style={styles.settingText}>Liên kết Google</Text>
@@ -530,7 +530,7 @@ const StudentTaiKhoan = () => {
             <Text style={styles.googleStatus}>
               {user?.isGoogleLinked ? "Đã liên kết" : "Chưa liên kết"}
             </Text>
-          </View>
+          </View> */}
         </View>
 
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
